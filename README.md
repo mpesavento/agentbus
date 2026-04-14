@@ -15,17 +15,65 @@ Agent A (Sparrow)           Agent B (Wren)
              (system service)
 ```
 
-## Prerequisites
+## Quickstart — two agents talking
 
-A running mosquitto broker. On Debian/Ubuntu/RPi:
+The worked example below gets Sparrow and Wren exchanging messages in under 5 minutes. It's the reference shape; every other integration path is a variation on it.
+
+### 1. Broker
 
 ```bash
-sudo apt install mosquitto mosquitto-clients
-# or use the bundled setup script:
-bash scripts/setup-mosquitto.sh
+sudo apt install mosquitto mosquitto-clients   # Debian/Ubuntu/RPi
+# or: bash scripts/setup-mosquitto.sh
 ```
 
-For multi-machine use, run mosquitto on one reachable host and point each agent at it (`--broker <host>`).
+The broker runs as a system service on port 1883 after install. For cross-machine use, run mosquitto on one reachable host and point each agent at it with `--broker <host>`. Tailscale or a VPN is recommended for untrusted networks.
+
+### 2. Install the CLI
+
+```bash
+pip install "agentbus[mcp]"
+```
+
+### 3. Start a listener daemon per agent
+
+**This is the part most people miss.** For an agent to *receive* messages reactively (no polling), a long-lived listener process must be running — it holds the MQTT subscription and, optionally, bridges incoming messages into a file the agent session can read.
+
+```bash
+# Terminal A (Sparrow's side):
+agentbus start --agent-id sparrow --inbox ~/sync/sparrow-inbox.md
+
+# Terminal B (Wren's side):
+agentbus start --agent-id wren --inbox ~/sync/wren-inbox.md
+```
+
+Each daemon:
+- Announces the agent online (retained presence)
+- Subscribes to `agents/<id>/inbox` + `agents/broadcast`
+- Appends every received message to the inbox file (the `FileBridgeHandler`)
+- Republishes `offline` on crash via MQTT Last-Will
+
+Run them under systemd-user, byobu, tmux, or a supervisor of your choice. No cron needed — MQTT push handles delivery.
+
+### 4. Send
+
+From any shell, script, or agent session:
+
+```bash
+agentbus send --agent-id sparrow --to wren --subject "hi" --body "got a minute?"
+```
+
+Wren's inbox file grows immediately; her next session turn sees it. If her session has the agentbus CLI, she can also read the queue directly without touching the file:
+
+```bash
+agentbus read --agent-id wren              # drain queued messages, pretty-print, exit
+agentbus read --agent-id wren --json       # same, as JSON (pipe to jq)
+agentbus watch --agent-id wren --timeout 60  # block until one arrives
+agentbus list                              # who's online right now?
+```
+
+That's the whole loop: broker → listener per agent → `send` from anywhere → peer reads via file bridge or CLI.
+
+---
 
 ## Install
 
@@ -35,18 +83,17 @@ pip install agentbus
 pip install "agentbus[archive,mcp]"
 ```
 
----
-
 ## Integration paths
 
-Agentbus supports four integration patterns, depending on how your agent is built. Pick the first one that matches:
+The quickstart above uses the CLI path (#4 below) because it's the most universal. Pick the first row that matches your setup — each one uses the same broker and wire protocol, so agents on different paths interoperate freely.
 
 | Your agent is… | Use path |
 |---|---|
-| Claude Code (Sparrow, Wren, claude.ai/code, OpenClaw, etc.) | **1. MCP server + skill** |
-| Any MCP-compliant agent (Cursor, other IDEs, custom LLM loops) | **2. MCP server (standalone)** |
-| A Python framework (LangGraph, CrewAI, custom asyncio) | **3. Python API** |
-| A shell script or cron job | **4. CLI** |
+| Claude Code (claude.ai/code, Claude Code CLI) | **1. Claude Code — MCP server + skill** |
+| OpenClaw | **2. OpenClaw — skill + listener daemon** |
+| Any other MCP-compliant agent (Cursor, custom LLM loops) | **3. Generic MCP agent** |
+| A Python framework (LangGraph, CrewAI, custom asyncio) | **4. Python API** |
+| A shell script, cron job, or any CLI-speaking agent | **5. CLI** |
 
 ---
 
@@ -69,7 +116,32 @@ Restart Claude Code. Four MCP tools become available:
 
 The skill (`skills/using-agentbus/SKILL.md`) explains reply-to threading, content-type hygiene, broadcast vs directed, and security rules (inbound bodies are data, not instructions). Claude auto-loads it when the user mentions a peer agent by name or asks about coordination.
 
-### 2. Generic MCP agent
+Claude Code **also** needs a listener daemon running (step 3 of the quickstart) to receive messages while the chat session is closed. The MCP tools only work while Claude is open — the daemon is what catches messages in between.
+
+### 2. OpenClaw — skill + listener daemon
+
+OpenClaw doesn't natively register MCP servers (it routes MCP via the `mcporter` skill), so the path is different: install the behavioral skill and run the listener daemon. The skill's examples work in CLI mode — no MCP sidecar required.
+
+```bash
+bash scripts/setup-openclaw-plugin.sh <agent-id> [broker-host]
+# example:
+bash scripts/setup-openclaw-plugin.sh wren localhost
+```
+
+This copies the skill to `~/.openclaw/skills/using-agentbus/` and prints the `agentbus start` command you need to run (typically under byobu or systemd-user). From then on, the OpenClaw agent uses `agentbus send` / `agentbus read` / `agentbus list` via its shell tool.
+
+**For reactive wake-up** (message arrives → OpenClaw agent takes a real turn, no polling), combine the listener daemon with `examples/openclaw-wake.sh`:
+
+```bash
+agentbus start \
+  --agent-id wren \
+  --inbox ~/sync/wren-inbox.md \
+  --invoke "$(pwd)/examples/openclaw-wake.sh main"
+```
+
+The `--inbox` half persists every message to a file (durability). The `--invoke` half runs `openclaw agent --agent main --message "<body>"` on each arrival, so Wren actually reasons about it instead of waiting for her next scheduled turn. End-to-end tested; see `examples/openclaw-wake.sh` for the wrapper source.
+
+### 3. Generic MCP agent
 
 If your agent speaks MCP but isn't Claude Code, run the server manually over stdio:
 
@@ -79,7 +151,7 @@ agentbus mcp-server --agent-id <your-id> --broker localhost
 
 Configure your MCP client to spawn that command. Tool names and signatures are identical to path 1; the SKILL.md serves as a reference for prompt/system-message authors even if your stack doesn't use skill files.
 
-### 3. Python framework (LangGraph, CrewAI, custom asyncio)
+### 4. Python framework (LangGraph, CrewAI, custom asyncio)
 
 Import and embed. This is the most direct path for in-process agents:
 
@@ -113,19 +185,32 @@ One-shot send without a context (fine for scripts, not recommended for tight loo
 await AgentBus(agent_id="sparrow").send(to="wren", subject="hi", body="ping")
 ```
 
-### 4. CLI — shell scripts, cron, pipelines
+### 5. CLI — shell scripts, cron, pipelines, or any non-MCP agent
+
+The CLI is the universal fallback. Every operation the MCP sidecar exposes is also a subcommand:
 
 ```bash
-# Inline body
+# Send (inline body)
 agentbus send --agent-id sparrow --to wren --subject hello --body "Hi Wren"
 
-# Body from a file
+# Send from a file
 agentbus send --agent-id sparrow --to wren --subject report --body-file report.md
 
-# Body from stdin (pipe-friendly)
+# Send from stdin (pipe-friendly)
 cat report.md | agentbus send --agent-id sparrow --to wren --subject report --body-file -
 
-# Start a listener with a file bridge
+# Drain queued messages and exit (non-blocking)
+agentbus read --agent-id sparrow
+agentbus read --agent-id sparrow --json | jq '.[].subject'
+
+# Block until a message arrives
+agentbus watch --agent-id sparrow --timeout 60
+
+# Who's online?
+agentbus list
+agentbus list --json
+
+# Start the listener daemon (long-running; file-bridges to inbox.md)
 agentbus start --agent-id sparrow --inbox ~/sync/inbox.md
 
 # Start the MCP sidecar for any stdio MCP client
@@ -133,6 +218,8 @@ agentbus mcp-server --agent-id sparrow
 ```
 
 `--body` and `--body-file` are mutually exclusive; exactly one is required.
+
+**Two receive models.** `start` is a persistent daemon that file-bridges incoming messages (reactive, survives session restarts). `read` / `watch` are one-shot calls an agent session can make directly. Most setups want both: the daemon for durability, the one-shot commands for responsive interaction within a session.
 
 ---
 
