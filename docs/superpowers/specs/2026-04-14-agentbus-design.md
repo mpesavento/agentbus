@@ -66,6 +66,7 @@ agents/broadcast             # all-agents messages
   "ts": "2026-04-14T05:00:00Z",
   "subject": "status update",
   "body": "...",
+  "content_type": "text/plain",
   "priority": "normal",
   "reply_to": null
 }
@@ -74,6 +75,7 @@ agents/broadcast             # all-agents messages
 - `id`: UUID4, generated on send
 - `priority`: `"normal"` | `"urgent"`
 - `reply_to`: message `id` of the message being replied to, or `null`
+- `content_type`: `"text/plain"` | `"text/markdown"` | `"text/x-code;lang=python"` | `"application/json"`. Body is always a raw string — the transport layer never transforms it. Content type is a hint for the receiver. Nested markdown containing code blocks is valid `text/markdown` with no special handling needed.
 - Validated with Pydantic on receive. Invalid envelopes are logged and discarded.
 
 ---
@@ -108,7 +110,8 @@ agentbus/
 │   ├── sparrow_wren_local.py   # two agents, one Pi
 │   └── cross_machine.py        # two agents, Tailscale
 ├── scripts/
-│   └── setup-mosquitto.sh      # install + configure mosquitto as systemd service
+│   ├── setup-mosquitto.sh      # install + configure mosquitto as systemd service
+│   └── setup-cc-plugin.sh      # write agentbus MCP entry to .claude/settings.json
 ├── pyproject.toml              # uv-managed, Python 3.9+
 └── README.md
 ```
@@ -159,7 +162,7 @@ class BaseHandler:
 Appends received message to a file in a format compatible with existing `sync/inbox.md` tooling. Backward-compatible migration path.
 
 ### DirectInvocationHandler
-Shells out to a configurable command on message arrival. Default template: `claude -p '{body}'`. Command receives full message envelope as env vars (`AGENTBUS_FROM`, `AGENTBUS_SUBJECT`, etc.) and body via stdin.
+Shells out to a configurable command on message arrival. Body is passed via **stdin** or a temp file — never interpolated into a shell string. Envelope fields are exposed as env vars (`AGENTBUS_FROM`, `AGENTBUS_SUBJECT`, `AGENTBUS_CONTENT_TYPE`, etc.). Default: `subprocess.run(["claude", "-p", prompt_file], input=body.encode())`.
 
 ### PersistentListenerHandler
 Manages a long-running listener process: reconnect loop with exponential backoff, configurable heartbeat, presence announcements on reconnect. Suitable for always-on agents.
@@ -173,15 +176,30 @@ Logs all messages (sent and received) to SQLite. Schema: `messages(id, from, to,
 
 `agentbus mcp-server --agent-id sparrow --broker localhost`
 
-Exposes three MCP tools:
+Exposes four MCP tools:
 
 | Tool | Description |
 |---|---|
 | `send_message` | Publish a message to another agent's inbox |
-| `read_inbox` | Read queued messages for this agent |
+| `read_inbox` | Read queued messages for this agent (poll) |
+| `watch_inbox` | Long-poll — blocks until a new message arrives, then returns it. CC calls this to get push-style delivery. |
 | `list_agents` | List agents currently announcing presence |
 
 Per-agent, not central. Each agent that wants MCP access runs its own sidecar. Stateless — reads from MQTT, no local DB required (unless archive is enabled).
+
+**Claude Code plugin registration** (`.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "agentbus": {
+      "command": "agentbus",
+      "args": ["mcp-server", "--agent-id", "sparrow", "--broker", "localhost"]
+    }
+  }
+}
+```
+
+`scripts/setup-cc-plugin.sh` writes this entry automatically.
 
 ---
 
@@ -211,6 +229,18 @@ mcp_port = 7890
 file_bridge = "~/sparrow-workspace/sync/inbox.md"
 archive = "~/.agentbus/archive.db"
 ```
+
+---
+
+## Security
+
+| Surface | Mitigation |
+|---|---|
+| Agent ID injection in topic paths | Validated at `AgentBus` construction: `[a-z0-9_-]+` only, max 64 chars. Rejected with clear error. |
+| Command injection in DirectInvocationHandler | Body passed via stdin or temp file only. Never interpolated into shell strings. `subprocess.run()` with explicit arg list, not `shell=True`. |
+| Message size | Configurable `max_body_bytes` (default 64KB). Messages over limit are logged and discarded. |
+| Rate limiting | Configurable `max_msg_per_second` per sender (default 10). Excess messages dropped and logged. |
+| Network exposure | Off by default (`bind_host = "127.0.0.1"`). For network deployments, document mosquitto password auth as opt-in hardening. Tailscale handles encryption for cross-machine setups. |
 
 ---
 
@@ -249,6 +279,7 @@ archive = "~/.agentbus/archive.db"
 ## Build Roadmap
 
 - [ ] `scripts/setup-mosquitto.sh` — install + systemd service
+- [ ] `scripts/setup-cc-plugin.sh` — register MCP sidecar in .claude/settings.json
 - [ ] `message.py` — AgentMessage + Pydantic validation
 - [ ] `bus.py` — AgentBus core (connect, send, listen, presence, LWT)
 - [ ] `handlers/base.py` — BaseHandler ABC
@@ -257,7 +288,7 @@ archive = "~/.agentbus/archive.db"
 - [ ] `handlers/persistent.py`
 - [ ] `archive.py` — SQLiteArchive handler
 - [ ] `cli.py` — click CLI (send, listen, start, mcp-server)
-- [ ] `mcp_server.py` — MCP sidecar (send_message, read_inbox, list_agents)
+- [ ] `mcp_server.py` — MCP sidecar (send_message, read_inbox, watch_inbox, list_agents)
 - [ ] Unit tests
 - [ ] Integration tests (mosquitto fixture)
 - [ ] `examples/sparrow_wren_local.py`
