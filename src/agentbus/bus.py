@@ -8,7 +8,7 @@ from typing import List
 
 import aiomqtt
 
-from .message import AgentMessage, _validate_agent_id
+from .message import AgentMessage, _validate_registered_agent_id
 from .handlers.base import BaseHandler
 
 logger = logging.getLogger(__name__)
@@ -22,10 +22,7 @@ class AgentBus:
         port: int = 1883,
         retain: bool = True,
     ) -> None:
-        try:
-            _validate_agent_id(agent_id)
-        except ValueError:
-            raise ValueError(f"agent_id must match [a-z0-9_-]{{1,64}}, got: {agent_id!r}")
+        _validate_registered_agent_id(agent_id)
         self.agent_id = agent_id
         self.broker = broker
         self.port = port

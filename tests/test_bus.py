@@ -20,6 +20,16 @@ def test_invalid_agent_id_raises():
         AgentBus(agent_id="BAD ID!", broker="localhost")
 
 
+def test_reserved_agent_id_broadcast_rejected():
+    with pytest.raises(ValueError, match="reserved"):
+        AgentBus(agent_id="broadcast", broker="localhost")
+
+
+def test_reserved_agent_id_system_rejected():
+    with pytest.raises(ValueError, match="reserved"):
+        AgentBus(agent_id="system", broker="localhost")
+
+
 def test_register_handler():
     bus = AgentBus(agent_id="sparrow", broker="localhost")
     h = RecordingHandler()
