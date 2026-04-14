@@ -54,13 +54,18 @@ Each daemon:
 
 Run them under systemd-user, byobu, tmux, or a supervisor of your choice. No cron needed — MQTT push handles delivery.
 
-### 4. Send
+### 4. Send — and always archive
 
 From any shell, script, or agent session:
 
 ```bash
+# Set once so every send archives automatically:
+export AGENTBUS_OUTBOX=~/sync/sparrow-outbox.md
+
 agentbus send --agent-id sparrow --to wren --subject "hi" --body "got a minute?"
 ```
+
+`AGENTBUS_OUTBOX` (or `--outbox` per call) appends every outbound message to a file using the same format as the receiver's inbox. Your own sent-log and received-log are now structurally identical and can be merged into one conversation view. **Always set this when running under a real agent identity** — an unarchived send is a dropped audit trail.
 
 Wren's inbox file grows immediately; her next session turn sees it. That's the receive path whenever the listener daemon is running for `wren`.
 
@@ -148,6 +153,8 @@ agentbus start \
 ```
 
 The `--inbox` half persists every message to a file (durability). The `--invoke` half runs `openclaw agent --agent main --message "<body>"` on each arrival, so Wren actually reasons about it instead of waiting for her next scheduled turn. End-to-end tested; see `examples/openclaw-wake.sh` for the wrapper source.
+
+Also set `AGENTBUS_OUTBOX=~/sync/wren-outbox.md` in the OpenClaw agent's shell env so every `agentbus send` from that agent archives outbound messages symmetrically with the inbox file. See [docs/notification-patterns.md](docs/notification-patterns.md) for the full archive + user-notification protocol.
 
 ### 3. Generic MCP agent
 
