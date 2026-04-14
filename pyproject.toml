@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentbus"
+version = "0.1.0"
+description = "Reactive pub/sub messaging for AI agents via MQTT"
+requires-python = ">=3.9"
+dependencies = [
+    "aiomqtt>=2.0",
+    "pydantic>=2.0",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+archive = ["aiosqlite>=0.19"]
+mcp = ["mcp>=1.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "anyio[trio]",
+]
+
+[project.scripts]
+agentbus = "agentbus.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentbus"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
