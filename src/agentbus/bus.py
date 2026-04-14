@@ -69,42 +69,69 @@ class AgentBus:
                 retain=self.retain,
             )
 
-    async def listen(self) -> None:
-        # Retained presence so late subscribers see current state.
-        # LWT retained too so an unexpected disconnect overwrites "online"
-        # with "offline" — without retain, a crashed agent would leave
-        # stale "online" state that never clears.
+    async def listen(
+        self,
+        reconnect_initial: float = 1.0,
+        reconnect_max: float = 60.0,
+    ) -> None:
+        """Subscribe to inbox/broadcast and dispatch messages to handlers.
+
+        On broker disconnect (MqttError) the loop reconnects with exponential
+        backoff (reconnect_initial → reconnect_max seconds). Normal exit — e.g.
+        the message iterator exhausting in tests, or asyncio.CancelledError
+        from the caller — returns cleanly without retry.
+
+        Retained presence: both the online announce and the LWT offline use
+        qos=1, retain=True so late subscribers see current state and stale
+        "online" is overwritten when an agent crashes unexpectedly.
+        """
         will = aiomqtt.Will(
             topic=f"agents/{self.agent_id}/presence",
             payload=json.dumps({"agent": self.agent_id, "status": "offline"}),
             qos=1,
             retain=True,
         )
-        async with aiomqtt.Client(self.broker, port=self.port, will=will) as client:
-            await client.publish(
-                f"agents/{self.agent_id}/presence",
-                json.dumps({"agent": self.agent_id, "status": "online"}),
-                qos=1,
-                retain=True,
-            )
-            await client.subscribe(f"agents/{self.agent_id}/inbox", qos=1)
-            await client.subscribe("agents/broadcast", qos=1)
+        backoff = reconnect_initial
+        while True:
+            try:
+                async with aiomqtt.Client(
+                    self.broker, port=self.port, will=will
+                ) as client:
+                    await client.publish(
+                        f"agents/{self.agent_id}/presence",
+                        json.dumps({"agent": self.agent_id, "status": "online"}),
+                        qos=1,
+                        retain=True,
+                    )
+                    await client.subscribe(f"agents/{self.agent_id}/inbox", qos=1)
+                    await client.subscribe("agents/broadcast", qos=1)
+                    backoff = reconnect_initial  # reset after successful (re)connect
 
-            async for mqtt_msg in client.messages:
-                try:
-                    msg = AgentMessage.from_json(mqtt_msg.payload)
-                except Exception as exc:
-                    logger.warning("Discarding invalid message envelope: %s", exc)
-                    continue
+                    async for mqtt_msg in client.messages:
+                        try:
+                            msg = AgentMessage.from_json(mqtt_msg.payload)
+                        except Exception as exc:
+                            logger.warning(
+                                "Discarding invalid message envelope: %s", exc
+                            )
+                            continue
 
-                for handler in self._handlers:
-                    try:
-                        await handler.handle(msg)
-                    except Exception as exc:
-                        logger.error(
-                            "Handler %s raised: %s",
-                            handler.__class__.__name__, exc,
-                        )
+                        for handler in self._handlers:
+                            try:
+                                await handler.handle(msg)
+                            except Exception as exc:
+                                logger.error(
+                                    "Handler %s raised: %s",
+                                    handler.__class__.__name__, exc,
+                                )
+                return  # iterator exhausted / clean shutdown
+            except aiomqtt.MqttError as exc:
+                logger.warning(
+                    "MQTT broker disconnected (%s); reconnecting in %.1fs",
+                    exc, backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, reconnect_max)
 
     async def disconnect(self) -> None:
         """Publish offline presence (retained). Call before process exit if

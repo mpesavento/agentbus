@@ -205,6 +205,53 @@ async def test_listen_skips_invalid_envelope():
 
 
 @pytest.mark.asyncio
+async def test_listen_reconnects_on_mqtt_error():
+    """If the broker drops, listen() reconnects rather than crashing."""
+    import aiomqtt
+    bus = AgentBus(agent_id="sparrow", broker="localhost")
+    handler = RecordingHandler()
+    bus.register_handler(handler)
+
+    msg = AgentMessage.create(from_="wren", to="sparrow", subject="ping", body="hi")
+
+    class FakeMessage:
+        payload = msg.to_json().encode()
+
+    class GoodClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            pass
+        async def publish(self, *args, **kwargs):
+            pass
+        async def subscribe(self, *args, **kwargs):
+            pass
+        @property
+        def messages(self):
+            async def _gen():
+                yield FakeMessage()
+            return _gen()
+
+    class FlakyClient:
+        async def __aenter__(self):
+            raise aiomqtt.MqttError("connection refused")
+        async def __aexit__(self, *_):
+            pass
+
+    call_sequence = [FlakyClient(), GoodClient()]
+
+    def _client_factory(*args, **kwargs):
+        return call_sequence.pop(0)
+
+    with patch("agentbus.bus.aiomqtt.Client", side_effect=_client_factory), \
+         patch("agentbus.bus.asyncio.sleep", new=AsyncMock()):  # don't actually wait
+        await bus.listen(reconnect_initial=0.01)
+
+    assert len(handler.received) == 1
+    assert call_sequence == []  # both clients were consumed
+
+
+@pytest.mark.asyncio
 async def test_listen_continues_after_handler_exception():
     bus = AgentBus(agent_id="sparrow", broker="localhost")
 
