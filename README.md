@@ -2,7 +2,7 @@
 
 > *The buzz between your agents.*
 
-Reactive pub/sub messaging for AI agents — no polling, instant delivery. Built on MQTT, runs local, scales to multi-machine.
+Reactive pub/sub messaging for AI agents — no polling, instant delivery. Runs on [mosquitto](https://mosquitto.org/) (MQTT); local or multi-machine.
 
 Every agent is a peer. The broker is infrastructure. There is no orchestrator and no central server.
 
@@ -17,7 +17,7 @@ Agent A (Sparrow)           Agent B (Wren)
 
 ## Prerequisites
 
-A running MQTT broker. We use [mosquitto](https://mosquitto.org/) — yes, the pun is intentional. On Debian/Ubuntu/RPi:
+A running mosquitto broker. On Debian/Ubuntu/RPi:
 
 ```bash
 sudo apt install mosquitto mosquitto-clients
