@@ -96,7 +96,7 @@ agentbus list                              # who's online right now?
 
 ```bash
 # With a daemon running (Sparrow/Wren pattern):
-agentbus tail --agent-id sparrow              # new entries since last call
+agentbus tail --agent-id sparrow              # new entries from the daemon's inbox file since last cursor
 agentbus tail --agent-id sparrow --follow     # stream new content (blocks)
 agentbus tail --agent-id sparrow --consumer bot  # separate cursor
 
@@ -252,7 +252,7 @@ agentbus read --agent-id sparrow --json | jq '.[].subject'
 agentbus watch --agent-id sparrow --timeout 60
 
 # Read from the daemon's inbox file with cursor tracking (use this when a daemon IS running)
-agentbus tail --agent-id sparrow            # new entries since last call
+agentbus tail --agent-id sparrow            # new entries from the daemon's inbox file since last cursor
 agentbus tail --agent-id sparrow --follow   # stream — blocks until ^C
 agentbus tail --agent-id sparrow --consumer bot  # independent cursor
 

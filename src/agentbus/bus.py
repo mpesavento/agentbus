@@ -59,9 +59,12 @@ class AgentBus:
             True, the broker queues QoS1 messages for this agent-id even when
             the listener is disconnected, and redelivers them on reconnect —
             a crashed or restarted daemon does not lose messages. Comes with
-            a tradeoff: only one client can be connected with this session's
-            identifier at a time; a second connection attempt kicks the first.
-            Default False for backward compatibility; daemons should set True.
+            two tradeoffs: only one client can be connected with this session's
+            identifier at a time (a second connection kicks the first), and
+            on reconnect the broker may redeliver in-flight messages whose
+            PUBACK was lost — handlers must be idempotent (this is the standard
+            QoS1 "at least once" contract). Default False for backward
+            compatibility; daemons should set True.
         """
         _validate_registered_agent_id(agent_id)
         self.agent_id = agent_id

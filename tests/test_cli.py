@@ -411,6 +411,54 @@ def test_tail_missing_inbox_exits_2(tmp_path):
     assert "inbox does not exist" in result.output
 
 
+def test_tail_rejects_path_traversal_consumer(tmp_path):
+    inbox = tmp_path / "inbox.md"
+    inbox.write_text("anything\n")
+    runner = CliRunner()
+    for bad in ["../escape", "foo/bar", "with space", "x" * 200]:
+        result = runner.invoke(main, [
+            "tail", "--agent-id", "sparrow",
+            "--inbox", str(inbox),
+            "--cursor-dir", str(tmp_path / "cursors"),
+            "--consumer", bad,
+        ])
+        assert result.exit_code == 2, f"expected reject for {bad!r}, got {result.output}"
+        assert "invalid --consumer" in result.output
+
+
+def test_tail_default_inbox_path_uses_home(tmp_path, monkeypatch):
+    """Without --inbox, defaults to ~/sync/<agent-id>-inbox.md."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake_home_inbox = tmp_path / "sync" / "sparrow-inbox.md"
+    fake_home_inbox.parent.mkdir(parents=True)
+    fake_home_inbox.write_text("default-path content\n")
+    runner = CliRunner()
+    result = runner.invoke(main, [
+        "tail", "--agent-id", "sparrow",
+        "--cursor-dir", str(tmp_path / "cursors"),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "default-path content" in result.output
+
+
+def test_tail_cursor_write_is_atomic(tmp_path):
+    """Tmp file used for write; final cursor never empty after partial write."""
+    inbox = tmp_path / "inbox.md"
+    cursors = tmp_path / "cursors"
+    inbox.write_text("payload\n")
+    runner = CliRunner()
+    runner.invoke(main, [
+        "tail", "--agent-id", "sparrow",
+        "--inbox", str(inbox), "--cursor-dir", str(cursors),
+    ])
+    cursor_file = cursors / "sparrow--default.cursor"
+    # The atomic write means no .tmp leftover.
+    assert cursor_file.exists()
+    assert not (cursors / "sparrow--default.tmp").exists()
+    # Cursor content must parse as int (not empty/garbage).
+    int(cursor_file.read_text().strip())
+
+
 def test_tail_handles_file_truncation(tmp_path):
     inbox = tmp_path / "inbox.md"
     cursors = tmp_path / "cursors"

@@ -311,12 +311,31 @@ def tail(
     race that `agentbus read` would create by subscribing to the same
     topic as the daemon.
 
+    Polling-based --follow (0.5s interval) is intentional: we stay
+    zero-dep across Linux/macOS/BSD instead of pulling in inotify/watchdog.
+    The cost is ~2 syscalls/sec per follower — noise floor in practice,
+    and the tail use case is "pick up on next agent turn", not
+    sub-100ms UI refresh.
+
     \b
     agentbus tail --agent-id sparrow              # read new lines since last call
     agentbus tail --agent-id sparrow --follow     # block; stream new content
     agentbus tail --agent-id sparrow --consumer bot   # separate cursor
     """
+    import os
+    import re
     from pathlib import Path
+
+    # Reject path-traversal-shaped consumer names — the value flows into a
+    # cursor filename. Today --consumer is operator-set, but future scripted
+    # callers might pass user-derived strings; cheap defence in depth.
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", consumer):
+        click.echo(
+            f"[agentbus] invalid --consumer {consumer!r}: must match "
+            f"[A-Za-z0-9_-]{{1,64}}",
+            err=True,
+        )
+        sys.exit(2)
 
     inbox_path = Path(inbox).expanduser() if inbox else Path.home() / "sync" / f"{agent_id}-inbox.md"
     cursors_root = Path(cursor_dir).expanduser() if cursor_dir else Path.home() / ".agentbus" / "cursors"
@@ -333,24 +352,48 @@ def tail(
         try:
             return int(cursor_file.read_text().strip())
         except (ValueError, OSError):
+            # Corrupt/empty cursor — re-emit from start. Loud enough to notice
+            # if it happens, quiet enough not to crash a follower loop.
+            click.echo(
+                f"[agentbus] cursor {cursor_file} unreadable; restarting from offset 0",
+                err=True,
+            )
             return 0
 
     def _write_cursor(offset: int) -> None:
-        cursor_file.write_text(str(offset))
+        # Atomic write so a SIGKILL between truncate and write can't leave
+        # an empty cursor file (which would cause the next call to re-emit
+        # the entire inbox).
+        tmp = cursor_file.with_suffix(".tmp")
+        tmp.write_text(str(offset))
+        os.replace(tmp, cursor_file)
 
-    def _emit_new() -> int:
-        """Read from cursor → EOF, print, advance cursor. Returns new offset."""
+    def _emit_new() -> int | None:
+        """Read from cursor → EOF, print, advance cursor.
+
+        Returns the new offset, or None if the inbox is currently missing
+        (rotated/deleted). Atomicity note: the daemon's FileBridgeHandler
+        appends one whole entry per syscall in O_APPEND mode, so the file
+        size we see is always at an entry boundary even if we read while
+        the daemon is mid-burst.
+        """
+        try:
+            size = inbox_path.stat().st_size
+        except FileNotFoundError:
+            return None
         start = _read_cursor()
-        size = inbox_path.stat().st_size
         if size < start:
-            # File was truncated/rotated — reset to start.
+            # File was truncated/rotated in place — reset to start.
             click.echo(f"[agentbus] inbox shrank ({size} < cursor {start}); resetting", err=True)
             start = 0
         if size == start:
             return start
-        with inbox_path.open("rb") as f:
-            f.seek(start)
-            chunk = f.read(size - start)
+        try:
+            with inbox_path.open("rb") as f:
+                f.seek(start)
+                chunk = f.read(size - start)
+        except FileNotFoundError:
+            return None
         click.echo(chunk.decode("utf-8", errors="replace"), nl=False)
         _write_cursor(size)
         return size
