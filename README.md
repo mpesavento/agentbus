@@ -37,8 +37,14 @@ bus.run()
 ## CLI
 
 ```bash
-# Send
+# Send — inline body
 agentbus send --agent-id sparrow --to wren --subject hello --body "Hi Wren"
+
+# Send — body from file
+agentbus send --agent-id sparrow --to wren --subject report --body-file report.md
+
+# Send — body from stdin (pipe-friendly)
+cat report.md | agentbus send --agent-id sparrow --to wren --subject report --body-file -
 
 # Start listener with file bridge
 agentbus start --agent-id sparrow --inbox ~/sync/inbox.md
@@ -46,6 +52,8 @@ agentbus start --agent-id sparrow --inbox ~/sync/inbox.md
 # Start MCP sidecar (for Claude Code / any MCP agent)
 agentbus mcp-server --agent-id sparrow
 ```
+
+`--body` and `--body-file` are mutually exclusive; exactly one is required.
 
 ## Claude Code Plugin
 
