@@ -1,11 +1,11 @@
 """MCP sidecar — exposes agentbus as MCP tools for CC/LLM integration.
 
-Usage: agentbus mcp-server --agent-id sparrow --broker localhost
+Usage: agentbus mcp-server --agent-id planner --broker localhost
 Register in .claude/settings.json:
   "mcpServers": {
     "agentbus": {
       "command": "agentbus",
-      "args": ["mcp-server", "--agent-id", "sparrow", "--broker", "localhost"]
+      "args": ["mcp-server", "--agent-id", "planner", "--broker", "localhost"]
     }
   }
 """

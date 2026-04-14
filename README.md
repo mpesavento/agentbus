@@ -7,7 +7,7 @@ Reactive pub/sub messaging for AI agents — no polling, instant delivery. Runs 
 Every agent is a peer. The broker is infrastructure. There is no orchestrator and no central server.
 
 ```
-Agent A (Sparrow)           Agent B (Wren)
+Agent A (Planner)           Agent B (Coder)
   AgentBus(embedded)          AgentBus(embedded)
         │                           │
         └────────────┬──────────────┘
@@ -17,7 +17,7 @@ Agent A (Sparrow)           Agent B (Wren)
 
 ## Quickstart — two agents talking
 
-The worked example below gets Sparrow and Wren exchanging messages in under 5 minutes. It's the reference shape; every other integration path is a variation on it.
+The worked example below gets Planner and Coder exchanging messages in under 5 minutes. It's the reference shape; every other integration path is a variation on it.
 
 ### 1. Broker
 
@@ -39,11 +39,11 @@ pip install "agentbus[mcp]"
 **This is the part most people miss.** For an agent to *receive* messages reactively (no polling), a long-lived listener process must be running — it holds the MQTT subscription and, optionally, bridges incoming messages into a file the agent session can read.
 
 ```bash
-# Terminal A (Sparrow's side):
-agentbus start --agent-id sparrow --inbox ~/sync/sparrow-inbox.md
+# Terminal A (Planner's side):
+agentbus start --agent-id planner --inbox ~/sync/planner-inbox.md
 
-# Terminal B (Wren's side):
-agentbus start --agent-id wren --inbox ~/sync/wren-inbox.md
+# Terminal B (Coder's side):
+agentbus start --agent-id coder --inbox ~/sync/coder-inbox.md
 ```
 
 Each daemon:
@@ -60,14 +60,14 @@ From any shell, script, or agent session:
 
 ```bash
 # Set once so every send archives automatically:
-export AGENTBUS_OUTBOX=~/sync/sparrow-outbox.md
+export AGENTBUS_OUTBOX=~/sync/planner-outbox.md
 
-agentbus send --agent-id sparrow --to wren --subject "hi" --body "got a minute?"
+agentbus send --agent-id planner --to coder --subject "hi" --body "got a minute?"
 ```
 
 `AGENTBUS_OUTBOX` (or `--outbox` per call) appends every outbound message to a file using the same format as the receiver's inbox. Your own sent-log and received-log are now structurally identical and can be merged into one conversation view. **Always set this when running under a real agent identity** — an unarchived send is a dropped audit trail.
 
-**Multi-agent safety.** If two agents might share the same shell environment, a bare `AGENTBUS_OUTBOX=/path/sparrow-outbox.md` leaks into both. Two fixes, pick one (or use both):
+**Multi-agent safety.** If two agents might share the same shell environment, a bare `AGENTBUS_OUTBOX=/path/planner-outbox.md` leaks into both. Two fixes, pick one (or use both):
 
 - **Template** — put `{agent_id}` in the path. The library expands it at send time:
   ```
@@ -76,14 +76,14 @@ agentbus send --agent-id sparrow --to wren --subject "hi" --body "got a minute?"
   Every `agentbus send --agent-id X` lands in `X-outbox.md`. One env var, correct file per id.
 - **Agent-scoped override** — `AGENTBUS_OUTBOX_<UPPER_AGENT_ID>` beats the shared one:
   ```
-  export AGENTBUS_OUTBOX_SPARROW=~/sync/sparrow-outbox.md
-  export AGENTBUS_OUTBOX_WREN=~/sync/wren-outbox.md
+  export AGENTBUS_OUTBOX_PLANNER=~/sync/planner-outbox.md
+  export AGENTBUS_OUTBOX_CODER=~/sync/coder-outbox.md
   ```
-  Hyphens in the agent-id become underscores (`wren-beta` → `AGENTBUS_OUTBOX_WREN_BETA`).
+  Hyphens in the agent-id become underscores (`coder-beta` → `AGENTBUS_OUTBOX_CODER_BETA`).
 
 Resolution order (highest first): `--outbox` flag, `AGENTBUS_OUTBOX_<ID>`, `AGENTBUS_OUTBOX`, none.
 
-Wren's inbox file grows immediately; her next session turn sees it. That's the receive path whenever the listener daemon is running for `wren`.
+Coder's inbox file grows immediately; her next session turn sees it. That's the receive path whenever the listener daemon is running for `coder`.
 
 ```bash
 agentbus list                              # who's online right now?
@@ -91,14 +91,14 @@ agentbus list                              # who's online right now?
 
 **Two read paths, pick by deployment shape:**
 
-- **Always-on agent with a daemon (Sparrow, Wren, any long-lived session)**: use `agentbus tail` to read new content from the inbox file. No MQTT contention with the daemon — the daemon is the sole broker subscriber, tail just reads the file it writes. Cursor-tracked so repeat calls only show new.
+- **Always-on agent with a daemon (Planner, Coder, any long-lived session)**: use `agentbus tail` to read new content from the inbox file. No MQTT contention with the daemon — the daemon is the sole broker subscriber, tail just reads the file it writes. Cursor-tracked so repeat calls only show new.
 - **Ephemeral or scripted agent without a daemon**: use `agentbus read` / `agentbus watch`. These open a fresh MQTT connection, catch retained messages or messages published during the connection window, and exit.
 
 ```bash
-# With a daemon running (Sparrow/Wren pattern):
-agentbus tail --agent-id sparrow              # new entries from the daemon's inbox file since last cursor
-agentbus tail --agent-id sparrow --follow     # stream new content (blocks)
-agentbus tail --agent-id sparrow --consumer bot  # separate cursor
+# With a daemon running (Planner/Coder pattern):
+agentbus tail --agent-id planner              # new entries from the daemon's inbox file since last cursor
+agentbus tail --agent-id planner --follow     # stream new content (blocks)
+agentbus tail --agent-id planner --consumer bot  # separate cursor
 
 # No daemon — ephemeral (CI job, shell pipeline):
 agentbus read --agent-id scratch              # drain retained messages, exit
@@ -142,7 +142,7 @@ Run the setup script. It registers the MCP server in `~/.claude/settings.json` *
 ```bash
 bash scripts/setup-cc-plugin.sh <agent-id> [broker-host]
 # example:
-bash scripts/setup-cc-plugin.sh sparrow localhost
+bash scripts/setup-cc-plugin.sh planner localhost
 ```
 
 Restart Claude Code. Four MCP tools become available:
@@ -163,7 +163,7 @@ OpenClaw doesn't natively register MCP servers (it routes MCP via the `mcporter`
 ```bash
 bash scripts/setup-openclaw-plugin.sh <agent-id> [broker-host]
 # example:
-bash scripts/setup-openclaw-plugin.sh wren localhost
+bash scripts/setup-openclaw-plugin.sh coder localhost
 ```
 
 This copies the skill to `~/.openclaw/skills/using-agentbus/` and prints the `agentbus start` command you need to run (typically under byobu or systemd-user). From then on, the OpenClaw agent uses `agentbus send` / `agentbus read` / `agentbus list` via its shell tool.
@@ -172,14 +172,14 @@ This copies the skill to `~/.openclaw/skills/using-agentbus/` and prints the `ag
 
 ```bash
 agentbus start \
-  --agent-id wren \
-  --inbox ~/sync/wren-inbox.md \
+  --agent-id coder \
+  --inbox ~/sync/coder-inbox.md \
   --invoke "$(pwd)/examples/openclaw-wake.sh main"
 ```
 
-The `--inbox` half persists every message to a file (durability). The `--invoke` half runs `openclaw agent --agent main --message "<body>"` on each arrival, so Wren actually reasons about it instead of waiting for her next scheduled turn. End-to-end tested; see `examples/openclaw-wake.sh` for the wrapper source.
+The `--inbox` half persists every message to a file (durability). The `--invoke` half runs `openclaw agent --agent main --message "<body>"` on each arrival, so Coder actually reasons about it instead of waiting for her next scheduled turn. End-to-end tested; see `examples/openclaw-wake.sh` for the wrapper source.
 
-Also set `AGENTBUS_OUTBOX=~/sync/wren-outbox.md` in the OpenClaw agent's shell env so every `agentbus send` from that agent archives outbound messages symmetrically with the inbox file. See [docs/notification-patterns.md](docs/notification-patterns.md) for the full archive + user-notification protocol.
+Also set `AGENTBUS_OUTBOX=~/sync/coder-outbox.md` in the OpenClaw agent's shell env so every `agentbus send` from that agent archives outbound messages symmetrically with the inbox file. See [docs/notification-patterns.md](docs/notification-patterns.md) for the full archive + user-notification protocol.
 
 ### 3. Generic MCP agent
 
@@ -201,9 +201,9 @@ from agentbus import AgentBus, FileBridgeHandler, PersistentListenerHandler
 
 # Persistent client — one MQTT connection reused for all sends
 async def main():
-    async with AgentBus(agent_id="sparrow", broker="localhost") as bus:
-        await bus.send(to="wren", subject="hello", body="Hi Wren!")
-        await bus.send(to="wren", subject="follow-up", body="Still there?")
+    async with AgentBus(agent_id="planner", broker="localhost") as bus:
+        await bus.send(to="coder", subject="hello", body="Hi Coder!")
+        await bus.send(to="coder", subject="follow-up", body="Still there?")
 
 asyncio.run(main())
 ```
@@ -213,7 +213,7 @@ Long-lived listener with handlers:
 ```python
 from agentbus import AgentBus, FileBridgeHandler, PersistentListenerHandler
 
-bus = AgentBus(agent_id="sparrow", broker="localhost")
+bus = AgentBus(agent_id="planner", broker="localhost")
 bus.register_handler(FileBridgeHandler("~/sync/inbox.md"))
 bus.register_handler(PersistentListenerHandler())
 bus.run()  # blocks; auto-reconnects on broker disconnect
@@ -222,7 +222,7 @@ bus.run()  # blocks; auto-reconnects on broker disconnect
 One-shot send without a context (fine for scripts, not recommended for tight loops):
 
 ```python
-await AgentBus(agent_id="sparrow").send(to="wren", subject="hi", body="ping")
+await AgentBus(agent_id="planner").send(to="coder", subject="hi", body="ping")
 ```
 
 ### 5. CLI — shell scripts, cron, pipelines, or any non-MCP agent
@@ -231,40 +231,40 @@ The CLI is the universal fallback. Every operation the MCP sidecar exposes is al
 
 ```bash
 # Send (inline body)
-agentbus send --agent-id sparrow --to wren --subject hello --body "Hi Wren"
+agentbus send --agent-id planner --to coder --subject hello --body "Hi Coder"
 
 # Send with audit trail (appends to outbox.md; pair with the peer's inbox.md)
-agentbus send --agent-id sparrow --to wren --subject hello --body "Hi Wren" \
-  --outbox ~/sync/sparrow-outbox.md
+agentbus send --agent-id planner --to coder --subject hello --body "Hi Coder" \
+  --outbox ~/sync/planner-outbox.md
 # Or set AGENTBUS_OUTBOX in the environment so every send logs automatically
 
 # Send from a file
-agentbus send --agent-id sparrow --to wren --subject report --body-file report.md
+agentbus send --agent-id planner --to coder --subject report --body-file report.md
 
 # Send from stdin (pipe-friendly)
-cat report.md | agentbus send --agent-id sparrow --to wren --subject report --body-file -
+cat report.md | agentbus send --agent-id planner --to coder --subject report --body-file -
 
 # Drain queued messages and exit (non-blocking; use ONLY when no daemon is running for this id)
-agentbus read --agent-id sparrow
-agentbus read --agent-id sparrow --json | jq '.[].subject'
+agentbus read --agent-id planner
+agentbus read --agent-id planner --json | jq '.[].subject'
 
 # Block until a message arrives (no-daemon contexts)
-agentbus watch --agent-id sparrow --timeout 60
+agentbus watch --agent-id planner --timeout 60
 
 # Read from the daemon's inbox file with cursor tracking (use this when a daemon IS running)
-agentbus tail --agent-id sparrow            # new entries from the daemon's inbox file since last cursor
-agentbus tail --agent-id sparrow --follow   # stream — blocks until ^C
-agentbus tail --agent-id sparrow --consumer bot  # independent cursor
+agentbus tail --agent-id planner            # new entries from the daemon's inbox file since last cursor
+agentbus tail --agent-id planner --follow   # stream — blocks until ^C
+agentbus tail --agent-id planner --consumer bot  # independent cursor
 
 # Who's online?
 agentbus list
 agentbus list --json
 
 # Start the listener daemon (long-running; file-bridges to inbox.md)
-agentbus start --agent-id sparrow --inbox ~/sync/inbox.md
+agentbus start --agent-id planner --inbox ~/sync/inbox.md
 
 # Start the MCP sidecar for any stdio MCP client
-agentbus mcp-server --agent-id sparrow
+agentbus mcp-server --agent-id planner
 ```
 
 `--body` and `--body-file` are mutually exclusive; exactly one is required.
@@ -291,8 +291,8 @@ Custom handlers implement `async def handle(self, msg: AgentMessage) -> None`.
 ```json
 {
   "id": "uuid4",
-  "from": "sparrow",
-  "to": "wren",
+  "from": "planner",
+  "to": "coder",
   "ts": "2026-04-14T05:00:00Z",
   "subject": "hello",
   "body": "...",
@@ -312,7 +312,7 @@ The wire protocol is identical on a single host and across hosts — agents just
 
 ### Over Tailscale (recommended)
 
-Tailscale gives you WireGuard-encrypted, peer-authenticated connectivity between hosts with zero public exposure. agentbus needs no TLS or auth configuration on the broker because the tailnet itself is authenticated. This is the path we use between an always-on Pi (Sparrow + Wren + broker) and occasional peers like a laptop Claude Code session.
+Tailscale gives you WireGuard-encrypted, peer-authenticated connectivity between hosts with zero public exposure. agentbus needs no TLS or auth configuration on the broker because the tailnet itself is authenticated. This is the path we use between an always-on Pi (Planner + Coder + broker) and occasional peers like a laptop Claude Code session.
 
 One-time broker host setup (the machine that runs mosquitto):
 
@@ -336,7 +336,7 @@ agentbus start --agent-id laptop-cc \
   --broker broker-host.your-tailnet.ts.net \
   --inbox ~/sync/laptop-cc-inbox.md
 
-agentbus send --agent-id laptop-cc --to sparrow \
+agentbus send --agent-id laptop-cc --to planner \
   --broker broker-host.your-tailnet.ts.net \
   --subject "hi" --body "from the laptop"
 ```

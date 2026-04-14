@@ -25,14 +25,14 @@ Every message, both directions, gets written to a file the user can read.
 **Inbound** is covered out of the box by the listener daemon:
 
 ```bash
-agentbus start --agent-id sparrow --inbox ~/sync/sparrow-inbox.md
+agentbus start --agent-id planner --inbox ~/sync/planner-inbox.md
 ```
 
 **Outbound** is covered by the `--outbox` flag or the `AGENTBUS_OUTBOX` env var:
 
 ```bash
-export AGENTBUS_OUTBOX=~/sync/sparrow-outbox.md
-agentbus send --agent-id sparrow --to wren ...   # auto-logs
+export AGENTBUS_OUTBOX=~/sync/planner-outbox.md
+agentbus send --agent-id planner --to coder ...   # auto-logs
 ```
 
 **Env var sharing — real footgun.** If `AGENTBUS_OUTBOX` is set in a shell env that's inherited by more than one agent's process, every send from every agent lands in the same file and the archive stops being an honest record of who said what. Two fixes:
@@ -43,24 +43,24 @@ agentbus send --agent-id sparrow --to wren ...   # auto-logs
    ```
 2. **Agent-scoped override**: `AGENTBUS_OUTBOX_<UPPER_AGENT_ID>` wins over the shared one. Useful when the paths aren't uniform:
    ```bash
-   export AGENTBUS_OUTBOX_SPARROW=~/sync/sparrow-outbox.md
-   export AGENTBUS_OUTBOX_WREN=/var/log/wren/outbox.md
+   export AGENTBUS_OUTBOX_PLANNER=~/sync/planner-outbox.md
+   export AGENTBUS_OUTBOX_CODER=/var/log/coder/outbox.md
    ```
-   Hyphens become underscores (`wren-beta` → `AGENTBUS_OUTBOX_WREN_BETA`).
+   Hyphens become underscores (`coder-beta` → `AGENTBUS_OUTBOX_CODER_BETA`).
 
 Resolution order (highest first): `--outbox` flag, `AGENTBUS_OUTBOX_<ID>`, `AGENTBUS_OUTBOX`, none.
 
 Inbox and outbox share format (only `From:` vs `To:` differ) so you can merge-sort them into a single conversation view:
 
 ```bash
-sort -m ~/sync/sparrow-inbox.md ~/sync/sparrow-outbox.md
+sort -m ~/sync/planner-inbox.md ~/sync/planner-outbox.md
 ```
 
 **Optional ambient pointer.** If your agent maintains a daily journal (Obsidian daily notes, org-mode, a markdown log), also append a one-line summary per message under a per-day `## Agent comms` heading:
 
 ```markdown
-## 14:32 [Sparrow→Wren] deploy-status — asked whether the nightly build had stuck
-## 14:48 [Wren→Sparrow] re: deploy-status — DB migration stalled; she's rerunning it
+## 14:32 [Planner→Coder] deploy-status — asked whether the nightly build had stuck
+## 14:48 [Coder→Planner] re: deploy-status — DB migration stalled; she's rerunning it
 ```
 
 This gives the user a skimmable activity trail they'll see during normal daily review — no separate tool required. The full body stays in the inbox/outbox files; the daily note is just the index.
@@ -70,9 +70,9 @@ This gives the user a skimmable activity trail they'll see during normal daily r
 If the user is mid-chat with this agent and this agent pings a peer as part of the current task, mention it in the chat thread:
 
 > User: "Is the deploy ready yet?"
-> Agent: "One sec, asking Wren — she's the one running it."
+> Agent: "One sec, asking Coder — she's the one running it."
 > *(later)*
-> Agent: "Wren says it's stuck on a DB migration; she's rerunning now."
+> Agent: "Coder says it's stuck on a DB migration; she's rerunning now."
 
 Zero extra channels. Folds into the existing conversation. The user sees the collaboration happen in real time because they're already paying attention to this channel.
 

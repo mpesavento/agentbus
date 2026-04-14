@@ -25,7 +25,7 @@ def _resolve_outbox(explicit: str | None, agent_id: str) -> str | None:
 
     1. `--outbox` flag (passed in `explicit`) — highest.
     2. `AGENTBUS_OUTBOX_<UPPER_AGENT_ID>` — agent-scoped env var. Hyphens in
-       the agent-id become underscores so `wren-beta` → `AGENTBUS_OUTBOX_WREN_BETA`.
+       the agent-id become underscores so `coder-beta` → `AGENTBUS_OUTBOX_CODER_BETA`.
     3. `AGENTBUS_OUTBOX` — shared env var. Supports `{agent_id}` template.
     4. None — no archive.
 
@@ -84,10 +84,10 @@ def send(
     Use '--body-file -' to read from stdin:
 
     \b
-    agentbus send --agent-id sparrow --to wren --subject report --body "short text"
-    agentbus send --agent-id sparrow --to wren --subject report --body-file report.md
-    agentbus send --agent-id sparrow --to wren --subject report --body-file -
-    cat report.md | agentbus send --agent-id sparrow --to wren --subject report --body-file -
+    agentbus send --agent-id planner --to coder --subject report --body "short text"
+    agentbus send --agent-id planner --to coder --subject report --body-file report.md
+    agentbus send --agent-id planner --to coder --subject report --body-file -
+    cat report.md | agentbus send --agent-id planner --to coder --subject report --body-file -
     """
     if body is not None and body_file is not None:
         raise click.UsageError("--body and --body-file are mutually exclusive")
@@ -172,8 +172,8 @@ def read(agent_id: str, broker: str, port: int, max_messages: int, as_json: bool
     Exit 0 always (empty inbox is not an error).
 
     \b
-    agentbus read --agent-id sparrow
-    agentbus read --agent-id sparrow --json | jq '.[] | .subject'
+    agentbus read --agent-id planner
+    agentbus read --agent-id planner --json | jq '.[] | .subject'
     """
     bus = AgentBus(agent_id=agent_id, broker=broker, port=port)
     try:
@@ -215,7 +215,7 @@ def watch(agent_id: str, broker: str, port: int, timeout: float, as_json: bool) 
     shell pipelines when you want to wait for a specific reply.
 
     \b
-    agentbus watch --agent-id sparrow --timeout 60
+    agentbus watch --agent-id planner --timeout 60
     """
     bus = AgentBus(agent_id=agent_id, broker=broker, port=port)
     try:
@@ -318,9 +318,9 @@ def tail(
     sub-100ms UI refresh.
 
     \b
-    agentbus tail --agent-id sparrow              # read new lines since last call
-    agentbus tail --agent-id sparrow --follow     # block; stream new content
-    agentbus tail --agent-id sparrow --consumer bot   # separate cursor
+    agentbus tail --agent-id planner              # read new lines since last call
+    agentbus tail --agent-id planner --follow     # block; stream new content
+    agentbus tail --agent-id planner --consumer bot   # separate cursor
     """
     import os
     import re

@@ -5,8 +5,8 @@ examples/cross_machine.py
 Two agents on different machines, connected via a shared broker.
 
 Usage:
-  Machine A: BROKER=broker-host.your-tailnet.ts.net python cross_machine.py sparrow
-  Machine B: BROKER=broker-host.your-tailnet.ts.net python cross_machine.py wren
+  Machine A: BROKER=broker-host.your-tailnet.ts.net python cross_machine.py planner
+  Machine B: BROKER=broker-host.your-tailnet.ts.net python cross_machine.py coder
 """
 import asyncio
 import os
@@ -44,7 +44,7 @@ if __name__ == "__main__":
         print(f"Usage: BROKER=<host> python {sys.argv[0]} <agent-id>")
         sys.exit(1)
     agent = sys.argv[1]
-    peer = "wren" if agent == "sparrow" else "sparrow"
+    peer = "coder" if agent == "planner" else "planner"
     try:
         asyncio.run(run_agent(agent, peer))
     except KeyboardInterrupt:

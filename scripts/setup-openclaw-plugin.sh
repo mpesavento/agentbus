@@ -10,7 +10,7 @@ BROKER="${2:-localhost}"
 
 if [ -z "$AGENT_ID" ]; then
   echo "Usage: $0 <agent-id> [broker-host]"
-  echo "  Example: $0 wren localhost"
+  echo "  Example: $0 coder localhost"
   exit 1
 fi
 

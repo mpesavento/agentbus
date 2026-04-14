@@ -8,12 +8,12 @@
 # Wire it in via --invoke on the listener daemon:
 #
 #   agentbus start \
-#     --agent-id wren \
-#     --inbox ~/sync/wren-inbox.md \
-#     --invoke "$HOME/projects/agentbus/examples/openclaw-wake.sh wren"
+#     --agent-id coder \
+#     --inbox ~/sync/coder-inbox.md \
+#     --invoke "$HOME/projects/agentbus/examples/openclaw-wake.sh coder"
 #
 # Arguments:
-#   $1  OpenClaw agent id (e.g. "main", "wren", "ops"). Required.
+#   $1  OpenClaw agent id (e.g. "main", "coder", "ops"). Required.
 #
 # Env vars (set by DirectInvocationHandler):
 #   AGENTBUS_FROM, AGENTBUS_SUBJECT, AGENTBUS_REPLY_TO, AGENTBUS_CONTENT_TYPE, …

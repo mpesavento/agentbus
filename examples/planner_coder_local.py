@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-examples/sparrow_wren_local.py
+examples/planner_coder_local.py
 
 Two agents communicating on the same machine.
 Run in two terminals:
-  Terminal 1: python sparrow_wren_local.py wren
-  Terminal 2: python sparrow_wren_local.py sparrow
+  Terminal 1: python planner_coder_local.py coder
+  Terminal 2: python planner_coder_local.py planner
 """
 import asyncio
 import sys
@@ -49,12 +49,12 @@ async def run_agent(agent_id: str, peer_id: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ("sparrow", "wren"):
-        print("Usage: python sparrow_wren_local.py <sparrow|wren>")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("planner", "coder"):
+        print("Usage: python planner_coder_local.py <planner|coder>")
         sys.exit(1)
 
     agent = sys.argv[1]
-    peer = "wren" if agent == "sparrow" else "sparrow"
+    peer = "coder" if agent == "planner" else "planner"
 
     try:
         asyncio.run(run_agent(agent, peer))

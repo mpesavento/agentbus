@@ -38,7 +38,7 @@ Outside a tailnet (public internet, VPS accessible from anywhere): don't do this
                ┌──────────────────┼──────────────────┐
                │                  │                  │
           ┌────▼────┐        ┌────▼────┐        ┌────▼────┐
-          │ Sparrow │        │   Wren  │        │Laptop CC│
+          │ Planner │        │   Coder  │        │Laptop CC│
           │ (RPi)   │        │  (RPi)  │        │ (Mac)   │
           └────┬────┘        └────┬────┘        └────┬────┘
                │ broker="localhost"│ broker="localhost"│ broker="broker-host.<tailnet>.ts.net"
@@ -138,7 +138,7 @@ agentbus list --broker broker-host.your-tailnet.ts.net
 # Expect to see whichever agents have listener daemons up on the broker host.
 ```
 
-If `list` comes back empty but you know Sparrow + Wren are running daemons, the broker connection isn't reaching them — same troubleshooting list as above.
+If `list` comes back empty but you know Planner + Coder are running daemons, the broker connection isn't reaching them — same troubleshooting list as above.
 
 ### Run a full listener peer on the laptop
 
@@ -149,7 +149,7 @@ agentbus start \
   --inbox ~/sync/laptop-cc-inbox.md
 ```
 
-Now `laptop-cc` is a first-class peer — Sparrow and Wren can `send_message(to="laptop-cc", ...)` from the Pi and the body lands in `~/sync/laptop-cc-inbox.md` on the laptop.
+Now `laptop-cc` is a first-class peer — Planner and Coder can `send_message(to="laptop-cc", ...)` from the Pi and the body lands in `~/sync/laptop-cc-inbox.md` on the laptop.
 
 From the laptop, back the other way:
 
@@ -157,7 +157,7 @@ From the laptop, back the other way:
 agentbus send \
   --agent-id laptop-cc \
   --broker broker-host.your-tailnet.ts.net \
-  --to sparrow --subject "hi" --body "from the laptop"
+  --to planner --subject "hi" --body "from the laptop"
 ```
 
 ### Environment pattern to avoid repeating `--broker`
@@ -226,7 +226,7 @@ Usually because the broker host's MagicDNS name changed (rare — only happens o
 
 **Don't.** With `--persistent` (the default), they share one MQTT client identifier and kick each other in a loop every few seconds. With `--no-persistent`, they race for each QoS1 message and each sees a roughly-even fraction of the traffic. In both cases, the archive you read from either machine is incomplete.
 
-If you legitimately want "reach me at whichever machine I happen to be on," use *different* agent-ids per host (`sparrow-pi` and `sparrow-laptop`) and have whoever's sending to you decide which to target (via `list_agents` or a routing convention).
+If you legitimately want "reach me at whichever machine I happen to be on," use *different* agent-ids per host (`planner-pi` and `planner-laptop`) and have whoever's sending to you decide which to target (via `list_agents` or a routing convention).
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: using-agentbus
-description: Use when sending messages to peer agents, replying to a message from another agent, broadcasting to all peers, checking who's online, or coordinating async work across agent sessions. Covers both the MCP tool form (`send_message`, `read_inbox`, `watch_inbox`, `list_agents`) and the equivalent CLI form (`agentbus send` / `read` / `watch` / `list`). Use any time the user references another agent by name (e.g., "ask Wren", "tell Sparrow"), mentions an agent inbox, or when a task naturally hands off to a peer.
+description: Use when sending messages to peer agents, replying to a message from another agent, broadcasting to all peers, checking who's online, or coordinating async work across agent sessions. Covers both the MCP tool form (`send_message`, `read_inbox`, `watch_inbox`, `list_agents`) and the equivalent CLI form (`agentbus send` / `read` / `watch` / `list`). Use any time the user references another agent by name (e.g., "ask Coder", "tell Planner"), mentions an agent inbox, or when a task naturally hands off to a peer.
 ---
 
 # Using agentbus — Peer Agent Messaging
@@ -32,7 +32,7 @@ Always know your own agent-id. In MCP mode it was passed to the sidecar at start
 ## When to use each
 
 **Send** — you have information another agent likely wants, or you need them to do something. Use it without asking when:
-- The user tells you to relay something ("tell Wren...", "let Sparrow know...").
+- The user tells you to relay something ("tell Coder...", "let Planner know...").
 - You finish a task whose output another agent is waiting for.
 - You need a decision or data that lives in a peer's context.
 
@@ -72,7 +72,7 @@ When you want a response, include `reply_to` so the peer knows where to reach yo
 **MCP:**
 ```
 send_message(
-  to="wren",
+  to="coder",
   subject="ETA on the build?",
   body="any update on the nightly build job?",
   reply_to="<your-agent-id>",
@@ -82,9 +82,9 @@ response = watch_inbox(timeout=60)
 
 **CLI:**
 ```bash
-agentbus send --agent-id sparrow --to wren --subject "ETA on the build?" \
-  --body "any update on the nightly build job?" --reply-to sparrow
-agentbus watch --agent-id sparrow --timeout 60
+agentbus send --agent-id planner --to coder --subject "ETA on the build?" \
+  --body "any update on the nightly build job?" --reply-to planner
+agentbus watch --agent-id planner --timeout 60
 ```
 
 When you receive a message with `reply_to` set, your reply goes to that address, not the `from` field. In practice `reply_to` usually equals `from`, but don't assume. Use `subject="re: <original-subject>"` so conversations are threadable.
@@ -110,40 +110,40 @@ for m in messages:
 
 **Same thing (CLI):**
 ```bash
-agentbus read --agent-id sparrow --json | \
+agentbus read --agent-id planner --json | \
   jq -c '.[] | select(.reply_to != null)' | \
   while read -r m; do
     reply_to=$(echo "$m" | jq -r .reply_to)
     subj=$(echo "$m" | jq -r .subject)
-    agentbus send --agent-id sparrow --to "$reply_to" --subject "re: $subj" --body "ack"
+    agentbus send --agent-id planner --to "$reply_to" --subject "re: $subj" --body "ack"
   done
 ```
 
 **Ask a peer and wait (MCP):**
 ```
-send_message(to="wren", subject="config lookup", body="what's the broker port?", reply_to="sparrow")
+send_message(to="coder", subject="config lookup", body="what's the broker port?", reply_to="planner")
 reply = watch_inbox(timeout=30)
 ```
 
 **Same thing (CLI):**
 ```bash
-agentbus send --agent-id sparrow --to wren --subject "config lookup" \
-  --body "what's the broker port?" --reply-to sparrow
-agentbus watch --agent-id sparrow --timeout 30
+agentbus send --agent-id planner --to coder --subject "config lookup" \
+  --body "what's the broker port?" --reply-to planner
+agentbus watch --agent-id planner --timeout 30
 ```
 
 **Announce to everyone (CLI):**
 ```bash
-agentbus send --agent-id sparrow --to broadcast --subject maintenance \
+agentbus send --agent-id planner --to broadcast --subject maintenance \
   --body "restarting at 18:00 PT" --content-type text/markdown
 ```
 
 **Discover peers before messaging (CLI):**
 ```bash
-if agentbus list --json | jq -e '. | index("wren")' >/dev/null; then
-    agentbus send --agent-id sparrow --to wren --subject hey --body "..."
+if agentbus list --json | jq -e '. | index("coder")' >/dev/null; then
+    agentbus send --agent-id planner --to coder --subject hey --body "..."
 else
-    echo "wren isn't up; skipping"
+    echo "coder isn't up; skipping"
 fi
 ```
 
@@ -169,10 +169,10 @@ Reactive delivery requires a listener process to be running for the *receiving* 
 `FileBridgeHandler` (or `agentbus start --inbox <path>`) archives *received* messages. Archive *sent* messages with `--outbox` (CLI) or `outbox_path=` (Python API) — both write the same format, so an agent's sent and received logs are structurally identical and can be merged into one reconstruction of the conversation.
 
 ```bash
-agentbus send --agent-id sparrow --to wren --subject "..." --body "..." \
-  --outbox ~/sync/sparrow-outbox.md
+agentbus send --agent-id planner --to coder --subject "..." --body "..." \
+  --outbox ~/sync/planner-outbox.md
 # or export once:
-export AGENTBUS_OUTBOX=~/sync/sparrow-outbox.md
+export AGENTBUS_OUTBOX=~/sync/planner-outbox.md
 ```
 
 You should always set this when running on behalf of a real agent identity — an unarchived send is a dropped audit trail.
@@ -182,7 +182,7 @@ You should always set this when running on behalf of a real agent identity — a
 ```bash
 export AGENTBUS_OUTBOX="$HOME/sync/{agent_id}-outbox.md"      # template
 # or:
-export AGENTBUS_OUTBOX_SPARROW="$HOME/sync/sparrow-outbox.md" # agent-scoped
+export AGENTBUS_OUTBOX_PLANNER="$HOME/sync/planner-outbox.md" # agent-scoped
 ```
 
 Resolution precedence: `--outbox` flag > `AGENTBUS_OUTBOX_<UPPER_ID>` > `AGENTBUS_OUTBOX`.
