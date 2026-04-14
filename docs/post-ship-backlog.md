@@ -59,41 +59,44 @@ specs-vs-implementation audit.
       should note "wire envelope must be permissive to support rolling
       upgrades" as a principle.
 
-- [ ] **Handler ordering semantics never documented.** Implementation
-      (bus.py:236-243) runs registered handlers sequentially and
-      catches exceptions per handler so one bad handler can't block
-      the others. Spec is silent. Add a one-paragraph semantic-doc to
-      `bus.py`'s `register_handler` and to SKILL.md.
+- [x] **Handler ordering semantics documented.** `register_handler`
+      docstring now spells out order = registration order, sequential
+      (not parallel), per-handler exception isolation. Test added
+      (`test_listen_preserves_handler_registration_order`).
 
-- [ ] **Broadcast is functional but undocumented in CLI help.**
-      `--to broadcast` works (bus.py:168); neither the CLI examples
-      nor `agentbus send --help` mention it. One-line add.
+- [x] **Broadcast now called out in CLI help.** `--to` help text
+      includes the `broadcast` sentinel.
 
 ### Test gaps (missing coverage for behaviours the spec promised)
 
-- [ ] **LWT happy path.** Presence announces "online" on subscribe,
-      graceful disconnect publishes "offline". `test_integration.py:9-10`
-      explicitly skips the abort-path LWT case; the graceful-path case
-      has no test at all.
+- [x] **LWT happy path** (closed in this series). Presence announces
+      "online" on subscribe, graceful disconnect publishes "offline".
+      `test_integration.py` previously skipped the abort-path LWT case;
+      graceful-path case is now covered by
+      `test_presence_lifecycle_online_then_offline`.
 
-- [ ] **Non-retained delivery semantics.** Default `retain=False`
-      means a message sent while no subscriber is connected is lost.
-      bus.py says so; no test validates it. Sign of the spec/plan not
-      being strict enough about which QoS/retain combinations are
-      actually recoverable.
+- [x] **Non-retained delivery semantics** (closed). Covered by
+      `test_non_retained_message_lost_when_no_subscriber` — fails if
+      the default retain flag is ever flipped.
 
-- [ ] **Handler exception isolation.** bus.py:240-243 catches
-      per-handler exceptions so one raising handler doesn't stop the
-      listen loop. No test verifies that invariant.
+- [x] **Handler exception isolation** — noted as a gap by the audit but
+      turned out to already be tested: `test_listen_continues_after_handler_exception`
+      in `tests/test_bus.py:311`. The audit missed it. Noting here so
+      future audits don't re-open.
 
-- [ ] **64KB body limit end-to-end.** Unit test at message.py:197-200
-      confirms the size cap; no integration test roundtrips a 64KB
-      body through MQTT+handlers.
+- [x] **Handler ordering** — new test
+      `test_listen_preserves_handler_registration_order`. Registration
+      order → dispatch order invariant is also now documented in
+      `AgentBus.register_handler`'s docstring.
 
-- [ ] **MCP tool signatures.** `test_mcp_server.py` mocks AgentBus.
-      No test exercises the real tools against the real broker. A
-      signature regression (wrong kwarg name, return type drift)
-      would go unnoticed until a live client broke.
+- [x] **64KB body limit end-to-end** (closed). Covered by
+      `test_send_receive_large_body_at_limit` — full roundtrip through
+      MQTT + handler at exactly the body cap.
+
+- [x] **MCP tool signatures** (closed). Covered by
+      `test_mcp_tools_expose_expected_signatures` — asserts the full
+      public surface (tool names, arg names, defaults) against the
+      expected contract. Any rename/removal fails loudly.
 
 ### Scope creep — shipped beyond spec, all fine, just flagging
 

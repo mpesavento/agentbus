@@ -100,6 +100,21 @@ class AgentBus:
         return self
 
     def register_handler(self, handler: BaseHandler) -> None:
+        """Register a handler to run on every incoming message.
+
+        Dispatch semantics (important — the spec did not nail these down,
+        so they are documented here as the canonical contract):
+
+        - **Order:** handlers run in the order they were registered.
+        - **Serialisation:** handlers run sequentially, not in parallel.
+          A slow handler blocks the next. If you need concurrency,
+          handle it inside the handler's own `async def handle`.
+        - **Exception isolation:** if a handler raises, the exception is
+          caught and logged, and subsequent handlers still run. The
+          listen loop is never taken down by a bad handler.
+
+        These guarantees are tested in `tests/test_bus.py`.
+        """
         self._handlers.append(handler)
 
     async def connect(self) -> None:

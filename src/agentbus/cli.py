@@ -43,7 +43,13 @@ def _resolve_outbox(explicit: str | None, agent_id: str) -> str | None:
 
 @main.command()
 @click.option("--agent-id", required=True, help="This agent's ID")
-@click.option("--to", "to_agent", required=True, help="Target agent ID")
+@click.option(
+    "--to",
+    "to_agent",
+    required=True,
+    help="Target agent ID, or the literal 'broadcast' to publish to every "
+         "listening peer.",
+)
 @click.option("--subject", required=True, help="Message subject")
 @click.option("--body", default=None, help="Message body as a string")
 @click.option(

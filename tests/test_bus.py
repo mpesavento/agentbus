@@ -343,3 +343,44 @@ async def test_listen_continues_after_handler_exception():
         await bus.listen()  # must not raise
 
     assert len(ok_handler.received) == 1  # ok_handler still ran
+
+
+@pytest.mark.asyncio
+async def test_listen_preserves_handler_registration_order():
+    """Documented invariant: handlers run in registration order.
+    Regressions here break anything that layers a logger before an
+    effect handler, etc."""
+    bus = AgentBus(agent_id="sparrow", broker="localhost")
+
+    order_recorded: list[str] = []
+
+    def make_handler(tag: str) -> BaseHandler:
+        class H(BaseHandler):
+            async def handle(self, msg):
+                order_recorded.append(tag)
+        return H()
+
+    bus.register_handler(make_handler("A"))
+    bus.register_handler(make_handler("B"))
+    bus.register_handler(make_handler("C"))
+
+    msg = AgentMessage.create(from_="wren", to="sparrow", subject="x", body="y")
+
+    class FakeMessage:
+        payload = msg.to_json().encode()
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): pass
+        async def publish(self, *args, **kwargs): pass
+        async def subscribe(self, *args, **kwargs): pass
+        @property
+        def messages(self):
+            async def _gen():
+                yield FakeMessage()
+            return _gen()
+
+    with patch("agentbus.bus.aiomqtt.Client", return_value=FakeClient()):
+        await bus.listen()
+
+    assert order_recorded == ["A", "B", "C"]

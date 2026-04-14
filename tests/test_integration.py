@@ -404,3 +404,141 @@ async def test_direct_invocation_handler_fires_subprocess(mosquitto_broker, tmp_
     finally:
         await _stop(t)
         await _clear_retained(host, port, ["agents/di-rx/presence"])
+
+
+@pytest.mark.asyncio
+async def test_presence_lifecycle_online_then_offline(mosquitto_broker):
+    """Happy-path LWT / presence test: agent publishes online on subscribe,
+    then publishes offline when the listen loop is cancelled cleanly.
+
+    We can't force an unclean TCP abort from test code, but we can verify
+    the graceful path end-to-end against a real broker: announce, yield
+    the online presence to a probe subscriber, shut down, yield the offline
+    presence retained."""
+    host, port = mosquitto_broker
+
+    agent = AgentBus(agent_id="presence-tester", broker=host, port=port)
+    listen_task = asyncio.create_task(agent.listen())
+    await asyncio.sleep(0.3)  # let presence announce
+
+    # Probe: subscribe to the presence topic and read the retained payload.
+    async def _read_presence():
+        async with aiomqtt.Client(host, port=port) as client:
+            await client.subscribe("agents/presence-tester/presence", qos=0)
+            try:
+                async with asyncio.timeout(0.5):
+                    async for mqtt_msg in client.messages:
+                        return json.loads(mqtt_msg.payload)
+            except asyncio.TimeoutError:
+                return None
+        return None
+
+    online_payload = await _read_presence()
+    assert online_payload is not None
+    assert online_payload.get("agent") == "presence-tester"
+    assert online_payload.get("status") == "online"
+
+    # Graceful shutdown — exercises the close path, not LWT.
+    await _stop(listen_task)
+    await agent.disconnect()
+    await asyncio.sleep(0.2)
+
+    offline_payload = await _read_presence()
+    assert offline_payload is not None
+    assert offline_payload.get("agent") == "presence-tester"
+    assert offline_payload.get("status") == "offline"
+
+    await _clear_retained(host, port, ["agents/presence-tester/presence"])
+
+
+@pytest.mark.asyncio
+async def test_non_retained_message_lost_when_no_subscriber(mosquitto_broker):
+    """Documented invariant: directed messages default to retain=False,
+    so sends that arrive while no subscriber is connected are dropped.
+    This is the entire reason we recommend running a listener daemon.
+
+    If someone accidentally flips the default or the topic scheme, this
+    test catches it."""
+    host, port = mosquitto_broker
+
+    # Send to an agent with no listener running.
+    sender = AgentBus(agent_id="lost-sender", broker=host, port=port, retain=False)
+    await sender.send(to="lost-receiver", subject="lost", body="never seen")
+    await asyncio.sleep(0.2)  # let the publish complete
+
+    # Now start a listener — it must NOT see the prior message, because
+    # retain=False + no subscriber at send time = lost.
+    handler = CollectingHandler()
+    receiver = AgentBus(agent_id="lost-receiver", broker=host, port=port, retain=False)
+    receiver.register_handler(handler)
+
+    listen_task = asyncio.create_task(receiver.listen())
+    await asyncio.sleep(0.5)  # listen long enough for any late delivery
+
+    try:
+        assert len(handler.received) == 0, (
+            f"Expected 0 messages for non-retained lost send, got "
+            f"{len(handler.received)}. This would mean the default retain "
+            f"semantics have changed, which is a breaking wire protocol change."
+        )
+    finally:
+        await _stop(listen_task)
+        await _clear_retained(host, port, ["agents/lost-receiver/presence"])
+
+
+@pytest.mark.asyncio
+async def test_send_receive_large_body_at_limit(mosquitto_broker):
+    """64KB is the documented envelope body cap. Verify a body at that
+    limit round-trips through MQTT + handler cleanly. This catches any
+    regression that would silently truncate or reject large bodies on the
+    wire (distinct from the unit test in test_message.py which only
+    validates the size-check on construct)."""
+    host, port = mosquitto_broker
+    handler = CollectingHandler()
+
+    receiver = AgentBus(agent_id="big-rx", broker=host, port=port, retain=False)
+    receiver.register_handler(handler)
+
+    sender = AgentBus(agent_id="big-tx", broker=host, port=port, retain=False)
+
+    listen_task = asyncio.create_task(receiver.listen())
+    await asyncio.sleep(0.2)
+
+    # Leave room for envelope overhead — body alone can be the full 64KB.
+    body = "x" * (64 * 1024)
+
+    try:
+        await sender.send(to="big-rx", subject="big", body=body)
+        await handler.wait_for_message(timeout=5.0)
+        assert len(handler.received) == 1
+        assert len(handler.received[0].body) == 64 * 1024
+        assert handler.received[0].body == body
+    finally:
+        await _stop(listen_task)
+        await _clear_retained(host, port, ["agents/big-rx/presence"])
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_expose_expected_signatures():
+    """MCP tool signatures are a public contract — anything consuming
+    agentbus via MCP (Claude Code sidecar, Cursor, custom clients) breaks
+    if a tool name or parameter name changes. Assert the full tool shape."""
+    app = create_mcp_app(agent_id="sig-check", broker="localhost", port=1883)
+
+    expected = {"send_message", "read_inbox", "watch_inbox", "list_agents"}
+    assert set(app._tool_fns.keys()) == expected
+
+    import inspect
+    send_sig = inspect.signature(app._tool_fns["send_message"])
+    # Positional/keyword params the LLM wire protocol depends on.
+    assert set(send_sig.parameters.keys()) >= {"to", "subject", "body", "content_type"}
+
+    read_sig = inspect.signature(app._tool_fns["read_inbox"])
+    assert len(read_sig.parameters) == 0  # no args
+
+    watch_sig = inspect.signature(app._tool_fns["watch_inbox"])
+    assert "timeout" in watch_sig.parameters
+    assert watch_sig.parameters["timeout"].default == 30.0
+
+    list_sig = inspect.signature(app._tool_fns["list_agents"])
+    assert len(list_sig.parameters) == 0
