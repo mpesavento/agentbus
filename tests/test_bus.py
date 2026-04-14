@@ -65,6 +65,62 @@ async def test_send_publishes_to_correct_topic():
 
 
 @pytest.mark.asyncio
+async def test_async_context_manager_reuses_single_client():
+    """Two sends inside `async with` must share one MQTT client."""
+    bus = AgentBus(agent_id="sparrow", broker="localhost")
+    publish_calls = []
+    aenter_calls = []
+
+    class FakeClient:
+        def __init__(self):
+            aenter_calls.append(self)
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            pass
+        async def publish(self, topic, payload, qos=0, retain=False):
+            publish_calls.append(topic)
+
+    with patch("agentbus.bus.aiomqtt.Client", side_effect=lambda *a, **kw: FakeClient()):
+        async with bus as b:
+            await b.send(to="wren", subject="one", body="x")
+            await b.send(to="wren", subject="two", body="y")
+
+    assert len(aenter_calls) == 1  # only one client ever constructed
+    assert publish_calls == ["agents/wren/inbox", "agents/wren/inbox"]
+
+
+@pytest.mark.asyncio
+async def test_one_shot_send_without_context_opens_its_own_client():
+    """Without connect()/context-manager, send() still works (connect-per-call)."""
+    bus = AgentBus(agent_id="sparrow", broker="localhost")
+    constructions = []
+
+    class FakeClient:
+        def __init__(self):
+            constructions.append(self)
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            pass
+        async def publish(self, *args, **kwargs):
+            pass
+
+    with patch("agentbus.bus.aiomqtt.Client", side_effect=lambda *a, **kw: FakeClient()):
+        await bus.send(to="wren", subject="hi", body="x")
+        await bus.send(to="wren", subject="hi", body="x")
+
+    assert len(constructions) == 2  # one client per send()
+
+
+@pytest.mark.asyncio
+async def test_close_is_idempotent():
+    bus = AgentBus(agent_id="sparrow", broker="localhost")
+    await bus.close()  # no-op before connect
+    await bus.close()  # still no-op
+
+
+@pytest.mark.asyncio
 async def test_send_default_retain_is_false():
     """Inbox messages must not be retained by default (would replay forever)."""
     bus = AgentBus(agent_id="sparrow", broker="localhost")

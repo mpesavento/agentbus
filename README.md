@@ -21,17 +21,33 @@ bash scripts/setup-mosquitto.sh
 ## Quickstart
 
 ```python
+import asyncio
+from agentbus import AgentBus, FileBridgeHandler, PersistentListenerHandler
+
+async def main():
+    # Persistent client — one MQTT connection reused for all sends
+    async with AgentBus(agent_id="sparrow", broker="localhost") as bus:
+        await bus.send(to="wren", subject="hello", body="Hi Wren!")
+        await bus.send(to="wren", subject="follow-up", body="Still there?")
+
+asyncio.run(main())
+```
+
+Or run as a long-lived listener:
+
+```python
 from agentbus import AgentBus, FileBridgeHandler, PersistentListenerHandler
 
 bus = AgentBus(agent_id="sparrow", broker="localhost")
 bus.register_handler(FileBridgeHandler("~/sync/inbox.md"))
 bus.register_handler(PersistentListenerHandler())
+bus.run()  # blocks; auto-reconnects on broker disconnect
+```
 
-# Send a message
-await bus.send(to="wren", subject="hello", body="Hi Wren!")
+One-shot send (CLI-style, connect-per-call):
 
-# Listen (blocks)
-bus.run()
+```python
+await AgentBus(agent_id="sparrow").send(to="wren", subject="hi", body="ping")
 ```
 
 ## CLI

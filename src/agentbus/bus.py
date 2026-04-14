@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import List
+from typing import Any, List
 
 import aiomqtt
 
@@ -37,9 +37,42 @@ class AgentBus:
         self.port = port
         self.retain = retain
         self._handlers: List[BaseHandler] = []
+        # Persistent-client state (used when AgentBus is entered as an async
+        # context manager, or when connect()/close() are called explicitly).
+        # When None, send() falls back to opening a per-call client.
+        self._client: aiomqtt.Client | None = None
+        self._client_cm: Any = None
 
     def register_handler(self, handler: BaseHandler) -> None:
         self._handlers.append(handler)
+
+    async def connect(self) -> None:
+        """Open a persistent MQTT connection for send() calls.
+
+        Idempotent. Pair with close() or use via `async with`. The listen()
+        path always manages its own connection (so it can reconnect) and does
+        not use this persistent client.
+        """
+        if self._client is not None:
+            return
+        self._client_cm = aiomqtt.Client(self.broker, port=self.port)
+        self._client = await self._client_cm.__aenter__()
+
+    async def close(self) -> None:
+        """Close the persistent MQTT connection if open. Idempotent."""
+        if self._client_cm is None:
+            return
+        cm = self._client_cm
+        self._client = None
+        self._client_cm = None
+        await cm.__aexit__(None, None, None)
+
+    async def __aenter__(self) -> "AgentBus":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
 
     async def send(
         self,
@@ -50,6 +83,13 @@ class AgentBus:
         priority: str = "normal",
         reply_to: str | None = None,
     ) -> None:
+        """Publish a message.
+
+        If a persistent client is open (via connect() or `async with`), it is
+        reused — no per-call connection churn. Otherwise a one-shot client is
+        opened just for this publish (fine for CLI/single-shot use, but avoid
+        for tight loops).
+        """
         msg = AgentMessage.create(
             from_=self.agent_id,
             to=to,
@@ -61,13 +101,12 @@ class AgentBus:
         )
         # Broadcast uses agents/broadcast; directed messages use agents/{to}/inbox
         topic = "agents/broadcast" if to == "broadcast" else f"agents/{to}/inbox"
+        payload = msg.to_json()
+        if self._client is not None:
+            await self._client.publish(topic, payload, qos=1, retain=self.retain)
+            return
         async with aiomqtt.Client(self.broker, port=self.port) as client:
-            await client.publish(
-                topic,
-                msg.to_json(),
-                qos=1,
-                retain=self.retain,
-            )
+            await client.publish(topic, payload, qos=1, retain=self.retain)
 
     async def listen(
         self,
