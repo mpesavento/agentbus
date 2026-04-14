@@ -329,15 +329,15 @@ On any other tailnet-joined host running an agent, point at that broker:
 
 ```bash
 # Python
-bus = AgentBus(agent_id="laptop-cc", broker="clawd-rpi.tailea0d6e.ts.net")
+bus = AgentBus(agent_id="laptop-cc", broker="broker-host.your-tailnet.ts.net")
 
 # CLI
 agentbus start --agent-id laptop-cc \
-  --broker clawd-rpi.tailea0d6e.ts.net \
+  --broker broker-host.your-tailnet.ts.net \
   --inbox ~/sync/laptop-cc-inbox.md
 
 agentbus send --agent-id laptop-cc --to sparrow \
-  --broker clawd-rpi.tailea0d6e.ts.net \
+  --broker broker-host.your-tailnet.ts.net \
   --subject "hi" --body "from the laptop"
 ```
 

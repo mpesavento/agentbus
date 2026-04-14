@@ -35,7 +35,7 @@ Agent A (e.g. Sparrow)        Agent B (e.g. Wren)
               (system service)
 ```
 
-Cross-machine: change `broker="localhost"` → `broker="clawd-rpi.ts.net"`. Everything else is identical. Tailscale handles auth/encryption at the network layer.
+Cross-machine: change `broker="localhost"` → `broker="broker-host.your-tailnet.ts.net"`. Everything else is identical. Tailscale handles auth/encryption at the network layer.
 
 ---
 

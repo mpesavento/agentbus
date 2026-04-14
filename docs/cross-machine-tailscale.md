@@ -41,7 +41,7 @@ Outside a tailnet (public internet, VPS accessible from anywhere): don't do this
           │ Sparrow │        │   Wren  │        │Laptop CC│
           │ (RPi)   │        │  (RPi)  │        │ (Mac)   │
           └────┬────┘        └────┬────┘        └────┬────┘
-               │ broker="localhost"│ broker="localhost"│ broker="clawd-rpi.<tn>.ts.net"
+               │ broker="localhost"│ broker="localhost"│ broker="broker-host.<tailnet>.ts.net"
                │                   │                   │
                └───────────────────┼───────────────────┘
                                    │
@@ -125,7 +125,7 @@ Every agentbus invocation on a non-broker host takes `--broker <address>`. That'
 
 Pick an addressing form:
 
-- **MagicDNS hostname** (`clawd-rpi.tailea0d6e.ts.net`) — preferred. Survives Tailscale renumbering, readable, auto-resolves.
+- **MagicDNS hostname** (`broker-host.your-tailnet.ts.net`) — preferred. Survives Tailscale renumbering, readable, auto-resolves.
 - **Tailscale IPv4** (`100.119.209.81`) — fallback if MagicDNS is off. Fine but brittle if the host's tailnet IP ever changes.
 - **Never use the physical LAN IP** (`192.168.x.x`) — works only on the same subnet, and if you bind the broker with `--tailscale-only`, it won't work even there.
 
@@ -134,7 +134,7 @@ Pick an addressing form:
 ```bash
 # On the peer:
 export AGENTBUS_OUTBOX="$HOME/sync/{agent_id}-outbox.md"
-agentbus list --broker clawd-rpi.tailea0d6e.ts.net
+agentbus list --broker broker-host.your-tailnet.ts.net
 # Expect to see whichever agents have listener daemons up on the broker host.
 ```
 
@@ -145,7 +145,7 @@ If `list` comes back empty but you know Sparrow + Wren are running daemons, the 
 ```bash
 agentbus start \
   --agent-id laptop-cc \
-  --broker clawd-rpi.tailea0d6e.ts.net \
+  --broker broker-host.your-tailnet.ts.net \
   --inbox ~/sync/laptop-cc-inbox.md
 ```
 
@@ -156,7 +156,7 @@ From the laptop, back the other way:
 ```bash
 agentbus send \
   --agent-id laptop-cc \
-  --broker clawd-rpi.tailea0d6e.ts.net \
+  --broker broker-host.your-tailnet.ts.net \
   --to sparrow --subject "hi" --body "from the laptop"
 ```
 
@@ -166,9 +166,9 @@ Most tailnet-connected agents talk to exactly one broker. Set it once:
 
 ```bash
 # in the peer host's shell profile
-export AGENTBUS_BROKER=clawd-rpi.tailea0d6e.ts.net   # future: honoured by CLI auto-default
+export AGENTBUS_BROKER=broker-host.your-tailnet.ts.net   # future: honoured by CLI auto-default
 # current: wrap agentbus in a small alias
-alias agentbus='agentbus --broker clawd-rpi.tailea0d6e.ts.net' # won't work; broker is per-subcommand
+alias agentbus='agentbus --broker broker-host.your-tailnet.ts.net' # won't work; broker is per-subcommand
 ```
 
 Today the cleanest route is a tiny wrapper script in `~/bin/ab`:
@@ -176,7 +176,7 @@ Today the cleanest route is a tiny wrapper script in `~/bin/ab`:
 ```bash
 #!/usr/bin/env bash
 # Redirect agentbus through the tailnet broker.
-exec agentbus "${@/#send/send --broker clawd-rpi.tailea0d6e.ts.net}"
+exec agentbus "${@/#send/send --broker broker-host.your-tailnet.ts.net}"
 # (simpler: just always type --broker explicitly)
 ```
 
