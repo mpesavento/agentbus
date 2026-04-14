@@ -217,6 +217,37 @@ def test_list_prints_agents():
     assert "wren" in result.output
 
 
+def test_read_broker_unreachable_exits_2():
+    runner = CliRunner()
+    with patch("agentbus.cli.AgentBus") as MockBus:
+        instance = MockBus.return_value
+        instance.read_inbox = AsyncMock(side_effect=aiomqtt.MqttError("Connection refused"))
+        result = runner.invoke(main, ["read", "--agent-id", "sparrow"])
+    assert result.exit_code == 2
+    assert "broker unreachable" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_watch_broker_unreachable_exits_2():
+    runner = CliRunner()
+    with patch("agentbus.cli.AgentBus") as MockBus:
+        instance = MockBus.return_value
+        instance.watch_inbox = AsyncMock(side_effect=aiomqtt.MqttError("Connection refused"))
+        result = runner.invoke(main, ["watch", "--agent-id", "sparrow", "--timeout", "1"])
+    assert result.exit_code == 2
+    assert "broker unreachable" in result.output
+
+
+def test_list_broker_unreachable_exits_2():
+    runner = CliRunner()
+    with patch("agentbus.cli.AgentBus.probe") as MockProbe:
+        instance = MockProbe.return_value
+        instance.list_agents = AsyncMock(side_effect=aiomqtt.MqttError("Connection refused"))
+        result = runner.invoke(main, ["list"])
+    assert result.exit_code == 2
+    assert "broker unreachable" in result.output
+
+
 def test_send_broker_unreachable_clean_error():
     """MqttError → friendly stderr message, exit 2, no traceback."""
     runner = CliRunner()

@@ -98,11 +98,14 @@ async def test_read_inbox_skips_malformed_envelopes():
 
 
 @pytest.mark.asyncio
-async def test_read_inbox_broker_error_returns_empty():
+async def test_read_inbox_broker_error_raises():
+    """CLI contract depends on this: MqttError must propagate so the CLI
+    layer can print a clean error and exit 2 (instead of confusing broker-down
+    with empty-inbox). MCP callers catch it at the tool boundary."""
     with patch("agentbus.bus.aiomqtt.Client", return_value=_BadClient()):
         bus = AgentBus(agent_id="me")
-        result = await bus.read_inbox(drain_timeout=0.1)
-    assert result == []
+        with pytest.raises(aiomqtt.MqttError):
+            await bus.read_inbox(drain_timeout=0.1)
 
 
 @pytest.mark.asyncio
@@ -148,11 +151,20 @@ async def test_watch_inbox_timeout_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_watch_inbox_broker_error_returns_none():
+async def test_watch_inbox_broker_error_raises():
+    """Same contract as read_inbox: MqttError propagates."""
     with patch("agentbus.bus.aiomqtt.Client", return_value=_BadClient()):
         bus = AgentBus(agent_id="me")
-        result = await bus.watch_inbox(timeout=0.1)
-    assert result is None
+        with pytest.raises(aiomqtt.MqttError):
+            await bus.watch_inbox(timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_list_agents_broker_error_raises():
+    with patch("agentbus.bus.aiomqtt.Client", return_value=_BadClient()):
+        bus = AgentBus.probe()
+        with pytest.raises(aiomqtt.MqttError):
+            await bus.list_agents(collect_window=0.1)
 
 
 # --------------------------------------------------------------------------

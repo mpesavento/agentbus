@@ -62,16 +62,24 @@ From any shell, script, or agent session:
 agentbus send --agent-id sparrow --to wren --subject "hi" --body "got a minute?"
 ```
 
-Wren's inbox file grows immediately; her next session turn sees it. If her session has the agentbus CLI, she can also read the queue directly without touching the file:
+Wren's inbox file grows immediately; her next session turn sees it. That's the receive path whenever the listener daemon is running for `wren`.
 
 ```bash
-agentbus read --agent-id wren              # drain queued messages, pretty-print, exit
-agentbus read --agent-id wren --json       # same, as JSON (pipe to jq)
-agentbus watch --agent-id wren --timeout 60  # block until one arrives
 agentbus list                              # who's online right now?
 ```
 
-That's the whole loop: broker → listener per agent → `send` from anywhere → peer reads via file bridge or CLI.
+**One-shot `read` / `watch` are for agent-ids that do NOT have a daemon running.** Non-persistent MQTT sessions (the fresh client each CLI call opens) and a running daemon are mutually exclusive for the same agent-id — whichever is subscribed when a QoS1 message arrives consumes it; the other never sees it. So pick a lane:
+
+- **Always-on agent (Sparrow, Wren, any long-lived session)**: run the daemon. Receive via the inbox file.
+- **Ephemeral or scripted agent (one-off jobs, CI, shell pipelines)**: skip the daemon. Use `agentbus read` / `agentbus watch` directly.
+
+```bash
+# Only when NO daemon is running for this id:
+agentbus read --agent-id scratch           # drain retained messages, exit
+agentbus watch --agent-id scratch --timeout 60  # block until one arrives
+```
+
+That's the whole loop: broker → pick daemon *or* one-shot per agent-id → `send` from anywhere → peer receives.
 
 ---
 

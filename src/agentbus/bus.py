@@ -201,26 +201,25 @@ class AgentBus:
         sends, keep a listener daemon up: `agentbus start --agent-id <me>`.
 
         Returns a list of message dicts (up to `max_messages`). Malformed
-        envelopes are skipped. Broker errors are logged and return [].
+        envelopes are skipped. Raises `aiomqtt.MqttError` if the broker is
+        unreachable — callers that want graceful empty-on-error behaviour
+        (e.g. the MCP tool surface) must catch it themselves.
         """
         messages: list[dict] = []
-        try:
-            async with aiomqtt.Client(self.broker, port=self.port) as client:
-                await client.subscribe(f"agents/{self.agent_id}/inbox", qos=1)
-                try:
-                    async with asyncio.timeout(drain_timeout):
-                        async for mqtt_msg in client.messages:
-                            try:
-                                msg = AgentMessage.from_json(mqtt_msg.payload)
-                                messages.append(json.loads(msg.to_json()))
-                            except Exception as exc:
-                                logger.warning("read_inbox: skipping bad envelope: %s", exc)
-                            if len(messages) >= max_messages:
-                                break
-                except asyncio.TimeoutError:
-                    pass
-        except aiomqtt.MqttError as exc:
-            logger.error("read_inbox: broker error (%s:%d): %s", self.broker, self.port, exc)
+        async with aiomqtt.Client(self.broker, port=self.port) as client:
+            await client.subscribe(f"agents/{self.agent_id}/inbox", qos=1)
+            try:
+                async with asyncio.timeout(drain_timeout):
+                    async for mqtt_msg in client.messages:
+                        try:
+                            msg = AgentMessage.from_json(mqtt_msg.payload)
+                            messages.append(json.loads(msg.to_json()))
+                        except Exception as exc:
+                            logger.warning("read_inbox: skipping bad envelope: %s", exc)
+                        if len(messages) >= max_messages:
+                            break
+            except asyncio.TimeoutError:
+                pass
         return messages
 
     async def watch_inbox(self, timeout: float = 30.0) -> dict | None:
@@ -232,51 +231,51 @@ class AgentBus:
         this agent-id, it will race with you for the same message — use one
         or the other, not both, for the same id.
 
-        Returns None on timeout or broker unavailability.
+        Returns None on timeout. Raises `aiomqtt.MqttError` if the broker is
+        unreachable; callers that want graceful None-on-error (e.g. the MCP
+        tool surface) must catch it themselves.
         """
-        try:
-            async with aiomqtt.Client(self.broker, port=self.port) as client:
-                await client.subscribe(f"agents/{self.agent_id}/inbox", qos=1)
-                try:
-                    async with asyncio.timeout(timeout):
-                        async for mqtt_msg in client.messages:
-                            try:
-                                msg = AgentMessage.from_json(mqtt_msg.payload)
-                                return json.loads(msg.to_json())
-                            except Exception as exc:
-                                logger.warning("watch_inbox: skipping bad envelope: %s", exc)
-                                continue
-                except asyncio.TimeoutError:
-                    return None
-        except aiomqtt.MqttError as exc:
-            logger.error("watch_inbox: broker error (%s:%d): %s", self.broker, self.port, exc)
+        async with aiomqtt.Client(self.broker, port=self.port) as client:
+            await client.subscribe(f"agents/{self.agent_id}/inbox", qos=1)
+            try:
+                async with asyncio.timeout(timeout):
+                    async for mqtt_msg in client.messages:
+                        try:
+                            msg = AgentMessage.from_json(mqtt_msg.payload)
+                            return json.loads(msg.to_json())
+                        except Exception as exc:
+                            logger.warning("watch_inbox: skipping bad envelope: %s", exc)
+                            continue
+            except asyncio.TimeoutError:
+                return None
         return None
 
     async def list_agents(self, collect_window: float = 0.5) -> list[str]:
-        """Return sorted IDs of agents whose latest retained presence is online."""
+        """Return sorted IDs of agents whose latest retained presence is online.
+
+        Raises `aiomqtt.MqttError` on broker failure; callers that want the
+        graceful empty-list fallback must catch it.
+        """
         online: set[str] = set()
-        try:
-            async with aiomqtt.Client(self.broker, port=self.port) as client:
-                await client.subscribe("agents/+/presence", qos=0)
-                try:
-                    async with asyncio.timeout(collect_window):
-                        async for mqtt_msg in client.messages:
-                            try:
-                                payload = json.loads(mqtt_msg.payload)
-                            except (json.JSONDecodeError, TypeError, ValueError):
-                                continue
-                            name = payload.get("agent")
-                            status = payload.get("status")
-                            if not name:
-                                continue
-                            if status == "online":
-                                online.add(name)
-                            else:
-                                online.discard(name)
-                except asyncio.TimeoutError:
-                    pass
-        except aiomqtt.MqttError as exc:
-            logger.warning("list_agents: broker error: %s", exc)
+        async with aiomqtt.Client(self.broker, port=self.port) as client:
+            await client.subscribe("agents/+/presence", qos=0)
+            try:
+                async with asyncio.timeout(collect_window):
+                    async for mqtt_msg in client.messages:
+                        try:
+                            payload = json.loads(mqtt_msg.payload)
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            continue
+                        name = payload.get("agent")
+                        status = payload.get("status")
+                        if not name:
+                            continue
+                        if status == "online":
+                            online.add(name)
+                        else:
+                            online.discard(name)
+            except asyncio.TimeoutError:
+                pass
         return sorted(online)
 
     async def disconnect(self) -> None:

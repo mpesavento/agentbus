@@ -134,7 +134,11 @@ def read(agent_id: str, broker: str, port: int, max_messages: int, as_json: bool
     agentbus read --agent-id sparrow --json | jq '.[] | .subject'
     """
     bus = AgentBus(agent_id=agent_id, broker=broker, port=port)
-    messages = asyncio.run(bus.read_inbox(max_messages=max_messages))
+    try:
+        messages = asyncio.run(bus.read_inbox(max_messages=max_messages))
+    except aiomqtt.MqttError as exc:
+        click.echo(f"[agentbus] broker unreachable ({broker}:{port}): {exc}", err=True)
+        sys.exit(2)
     if as_json:
         click.echo(json.dumps(messages, indent=2))
         return
@@ -172,7 +176,11 @@ def watch(agent_id: str, broker: str, port: int, timeout: float, as_json: bool) 
     agentbus watch --agent-id sparrow --timeout 60
     """
     bus = AgentBus(agent_id=agent_id, broker=broker, port=port)
-    msg = asyncio.run(bus.watch_inbox(timeout=timeout))
+    try:
+        msg = asyncio.run(bus.watch_inbox(timeout=timeout))
+    except aiomqtt.MqttError as exc:
+        click.echo(f"[agentbus] broker unreachable ({broker}:{port}): {exc}", err=True)
+        sys.exit(2)
     if msg is None:
         click.echo(f"[agentbus] {agent_id}: timeout after {timeout}s", err=True)
         sys.exit(1)
@@ -199,7 +207,11 @@ def list_agents_cmd(broker: str, port: int, as_json: bool) -> None:
     agentbus list --json
     """
     bus = AgentBus.probe(broker=broker, port=port)
-    agents = asyncio.run(bus.list_agents())
+    try:
+        agents = asyncio.run(bus.list_agents())
+    except aiomqtt.MqttError as exc:
+        click.echo(f"[agentbus] broker unreachable ({broker}:{port}): {exc}", err=True)
+        sys.exit(2)
     if as_json:
         click.echo(json.dumps(agents))
         return
