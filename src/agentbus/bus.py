@@ -43,6 +43,25 @@ class AgentBus:
         self._client: aiomqtt.Client | None = None
         self._client_cm: Any = None
 
+    @classmethod
+    def probe(cls, broker: str = "localhost", port: int = 1883) -> "AgentBus":
+        """Construct a broker-only instance for operations that don't need a
+        registered agent identity (e.g. `list_agents`).
+
+        The returned bus bypasses agent-id validation; it never publishes
+        presence, never subscribes to an inbox topic, and must not be used
+        to send. Use only for presence/discovery queries.
+        """
+        self = cls.__new__(cls)
+        self.agent_id = "_probe"
+        self.broker = broker
+        self.port = port
+        self.retain = False
+        self._handlers = []
+        self._client = None
+        self._client_cm = None
+        return self
+
     def register_handler(self, handler: BaseHandler) -> None:
         self._handlers.append(handler)
 
@@ -173,7 +192,13 @@ class AgentBus:
                 backoff = min(backoff * 2, reconnect_max)
 
     async def read_inbox(self, max_messages: int = 10, drain_timeout: float = 1.0) -> list[dict]:
-        """Non-blocking drain of queued retained messages for this agent.
+        """Non-blocking drain of **retained** messages for this agent.
+
+        Opens a fresh non-persistent MQTT session per call. That means only
+        messages sent with `retain=True` are visible — ordinary directed
+        sends (our default, `retain=False`) that arrived while no subscriber
+        was connected are already gone. For durable delivery of non-retained
+        sends, keep a listener daemon up: `agentbus start --agent-id <me>`.
 
         Returns a list of message dicts (up to `max_messages`). Malformed
         envelopes are skipped. Broker errors are logged and return [].
@@ -200,6 +225,12 @@ class AgentBus:
 
     async def watch_inbox(self, timeout: float = 30.0) -> dict | None:
         """Long-poll — blocks until a message arrives, returns it, or times out.
+
+        Opens a fresh non-persistent MQTT session. Only catches messages
+        **published while this call is active**, plus any with `retain=True`
+        on subscribe. If a durable listener daemon is already running for
+        this agent-id, it will race with you for the same message — use one
+        or the other, not both, for the same id.
 
         Returns None on timeout or broker unavailability.
         """

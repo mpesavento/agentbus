@@ -119,11 +119,15 @@ def start(
 @click.option("--max", "max_messages", default=10, show_default=True, help="Max messages to drain")
 @click.option("--json", "as_json", is_flag=True, help="Emit raw JSON array (default: pretty)")
 def read(agent_id: str, broker: str, port: int, max_messages: int, as_json: bool) -> None:
-    """Drain queued messages from your inbox and exit.
+    """Drain retained messages from your inbox and exit.
 
-    Non-blocking: returns immediately with whatever's waiting. Exit 0
-    always (no messages is not an error). Exit 2 if the broker is
-    unreachable.
+    Non-blocking: returns immediately with whatever's waiting. Catches
+    only messages sent with `retain=True` — non-retained directed sends
+    (the default) that arrived while no subscriber was connected are
+    already gone. For durable delivery, keep a listener daemon up:
+    `agentbus start --agent-id <me> --inbox <path>`.
+
+    Exit 0 always (empty inbox is not an error).
 
     \b
     agentbus read --agent-id sparrow
@@ -156,6 +160,10 @@ def read(agent_id: str, broker: str, port: int, max_messages: int, as_json: bool
 @click.option("--json", "as_json", is_flag=True, help="Emit raw JSON (default: pretty)")
 def watch(agent_id: str, broker: str, port: int, timeout: float, as_json: bool) -> None:
     """Block until one message arrives, print it, exit.
+
+    Catches messages published while this call is active. If a listener
+    daemon is already running for the same agent-id, the two will race
+    for each incoming message — use one mechanism per id at a time.
 
     Exit 0 on message, exit 1 on timeout, exit 2 on broker error. Use in
     shell pipelines when you want to wait for a specific reply.
@@ -190,7 +198,7 @@ def list_agents_cmd(broker: str, port: int, as_json: bool) -> None:
     agentbus list
     agentbus list --json
     """
-    bus = AgentBus(agent_id="_probe", broker=broker, port=port)
+    bus = AgentBus.probe(broker=broker, port=port)
     agents = asyncio.run(bus.list_agents())
     if as_json:
         click.echo(json.dumps(agents))

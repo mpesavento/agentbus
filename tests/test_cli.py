@@ -22,6 +22,24 @@ def test_send_inline_body(tmp_path):
     assert call_kwargs["to"] == "wren"
     assert call_kwargs["subject"] == "hello"
     assert call_kwargs["body"] == "world"
+    assert call_kwargs["reply_to"] is None
+
+
+def test_send_reply_to_roundtrips():
+    runner = CliRunner()
+    with patch("agentbus.cli.AgentBus") as MockBus:
+        instance = MockBus.return_value
+        instance.send = AsyncMock()
+        result = runner.invoke(main, [
+            "send",
+            "--agent-id", "sparrow",
+            "--to", "wren",
+            "--subject", "q",
+            "--body", "?",
+            "--reply-to", "sparrow",
+        ])
+    assert result.exit_code == 0, result.output
+    assert instance.send.call_args.kwargs["reply_to"] == "sparrow"
 
 
 def test_send_body_file(tmp_path):
@@ -180,8 +198,8 @@ def test_watch_returns_message():
 
 def test_list_empty():
     runner = CliRunner()
-    with patch("agentbus.cli.AgentBus") as MockBus:
-        instance = MockBus.return_value
+    with patch("agentbus.cli.AgentBus.probe") as MockProbe:
+        instance = MockProbe.return_value
         instance.list_agents = AsyncMock(return_value=[])
         result = runner.invoke(main, ["list"])
     assert result.exit_code == 0, result.output
@@ -190,8 +208,8 @@ def test_list_empty():
 
 def test_list_prints_agents():
     runner = CliRunner()
-    with patch("agentbus.cli.AgentBus") as MockBus:
-        instance = MockBus.return_value
+    with patch("agentbus.cli.AgentBus.probe") as MockProbe:
+        instance = MockProbe.return_value
         instance.list_agents = AsyncMock(return_value=["sparrow", "wren"])
         result = runner.invoke(main, ["list"])
     assert result.exit_code == 0, result.output
@@ -233,8 +251,8 @@ def test_start_invoke_uses_shlex_split():
 
 def test_list_json():
     runner = CliRunner()
-    with patch("agentbus.cli.AgentBus") as MockBus:
-        instance = MockBus.return_value
+    with patch("agentbus.cli.AgentBus.probe") as MockProbe:
+        instance = MockProbe.return_value
         instance.list_agents = AsyncMock(return_value=["sparrow", "wren"])
         result = runner.invoke(main, ["list", "--json"])
     assert result.exit_code == 0, result.output

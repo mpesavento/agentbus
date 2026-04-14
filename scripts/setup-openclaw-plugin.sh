@@ -20,11 +20,14 @@ SKILL_SRC="$REPO_ROOT/skills/using-agentbus"
 SKILL_DST="$HOME/.openclaw/skills/using-agentbus"
 INBOX="$HOME/sync/${AGENT_ID}-inbox.md"
 
-# 1. Verify OpenClaw is present (soft check — the skill dir is the canonical marker)
+# 1. Verify OpenClaw is present. The skills directory is the canonical marker.
+# Bail here rather than silently creating a fake install — installing the skill
+# into a non-existent OpenClaw is worse than erroring out.
 if [ ! -d "$HOME/.openclaw/skills" ]; then
-  echo "[agentbus] WARNING: $HOME/.openclaw/skills not found — is OpenClaw installed?"
-  echo "[agentbus] Creating the directory anyway and installing the skill."
-  mkdir -p "$HOME/.openclaw/skills"
+  echo "[agentbus] ERROR: $HOME/.openclaw/skills does not exist."
+  echo "[agentbus] OpenClaw does not appear to be installed for this user."
+  echo "[agentbus] Install OpenClaw first, then re-run this script."
+  exit 1
 fi
 
 # 2. Verify the agentbus CLI resolves
