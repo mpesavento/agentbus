@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # scripts/setup-cc-plugin.sh
-# Register agentbus MCP sidecar in Claude Code settings.json.
+# Register agentbus MCP sidecar in Claude Code settings.json and install the
+# behavioral skill that teaches Claude when/how to use the MCP tools.
 set -euo pipefail
 
 AGENT_ID="${1:-}"
@@ -13,8 +14,13 @@ if [ -z "$AGENT_ID" ]; then
 fi
 
 SETTINGS_FILE="${HOME}/.claude/settings.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SKILL_SRC="$REPO_ROOT/skills/using-agentbus"
+SKILL_DST="$HOME/.claude/skills/using-agentbus"
 
 if [ ! -f "$SETTINGS_FILE" ]; then
+  mkdir -p "$(dirname "$SETTINGS_FILE")"
   echo '{}' > "$SETTINGS_FILE"
 fi
 
@@ -37,5 +43,15 @@ with open(settings_path, "w") as f:
 
 print(f"[agentbus] Registered MCP sidecar in {settings_path}")
 print(f"[agentbus] agent-id: {agent_id}, broker: {broker}")
-print("[agentbus] Restart Claude Code to pick up the new MCP server.")
 EOF
+
+# Install the behavioral skill so Claude Code knows when/how to use the tools.
+if [ -d "$SKILL_SRC" ]; then
+  mkdir -p "$(dirname "$SKILL_DST")"
+  cp -r "$SKILL_SRC" "$SKILL_DST"
+  echo "[agentbus] Installed skill at $SKILL_DST"
+else
+  echo "[agentbus] WARNING: skill source not found at $SKILL_SRC — MCP tools will work but Claude won't have usage guidance"
+fi
+
+echo "[agentbus] Restart Claude Code to pick up the new MCP server + skill."
