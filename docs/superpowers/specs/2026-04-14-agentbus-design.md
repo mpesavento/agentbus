@@ -317,3 +317,83 @@ mcp = ["mcp>=1.0"]
 [project.scripts]
 agentbus = "agentbus.cli:main"
 ```
+
+---
+
+# Addendum — shipped beyond this spec (post-v1.0)
+
+This spec is frozen as the design-intent record. Everything below reflects
+features / docs / scripts that shipped once agentbus was in use and
+surfaced needs the original spec didn't anticipate. Full change history:
+[CHANGELOG.md](../../../CHANGELOG.md). Live task queue for open items:
+[docs/post-ship-backlog.md](../../post-ship-backlog.md).
+
+## CLI surface additions
+
+The spec committed to `send` / `listen` / `mcp-server` / `start`. Shipped
+in addition:
+
+- `agentbus read` — non-blocking MQTT drain, returns retained queue.
+- `agentbus watch` — long-poll MQTT for one new message, block then exit.
+- `agentbus list` — enumerate online peers (MQTT-native).
+- `agentbus tail` — cursor-based file consumer for the daemon's inbox
+  file. The correct read path when a listener daemon is running —
+  avoids the race between an active daemon and a separate `agentbus
+  read` on the same id.
+
+All four have CLI parity with the MCP tool surface and share the same
+underlying implementation on `AgentBus`.
+
+## Envelope & archive
+
+- `--outbox <path>` on `agentbus send`, plus `AGENTBUS_OUTBOX` (with
+  `{agent_id}` template) and agent-scoped `AGENTBUS_OUTBOX_<ID>` env
+  vars — symmetric outbound archive to match the inbox file.
+- `--reply-to` on CLI (the envelope field existed; CLI didn't expose it).
+- `--priority {low,normal,high}` on CLI (same).
+- `priority` envelope field loosened from `Literal` to `str` after a
+  silent-discard incident during rolling upgrade. Wire-compat discipline
+  now codified in `CHANGELOG.md`.
+
+## Wake wrappers (reactive push)
+
+Not in the spec; emerged from the "archive is not notification" realization
+during deployment.
+
+- `examples/openclaw-wake.sh <openclaw-agent-id>` — wraps
+  `openclaw agent --message` so a priority=high inbound spawns a real
+  OpenClaw reasoning turn.
+- `examples/claude-code-wake.sh <agent-id>` — equivalent via
+  `claude --print` for Claude Code peers.
+
+Both sanitize envelope fields and render bodies under explicit
+`[UNTRUSTED PEER METADATA]` / `[UNTRUSTED PEER BODY]` framing to block
+prompt injection via subject/from/reply_to.
+
+## Deployment docs + scripts
+
+- `docs/cross-machine-tailscale.md` — full Tailscale walkthrough
+  (topology, verification, security, failure modes, preflight).
+- `docs/notification-patterns.md` — 4-tier notification protocol
+  (archive always / narrate mid-chat / push on priority=high / silent
+  otherwise) with per-agent-system recipes.
+- `scripts/setup-mosquitto.sh` gained `--tailscale` and
+  `--tailscale-only` modes.
+- `scripts/setup-openclaw-plugin.sh` and `scripts/setup-cc-plugin.sh` —
+  per-host installers.
+- `scripts/inbox-watch.sh` — cron-driven Telegram summariser for new
+  inbox entries (works independently of wake wrappers; complementary
+  under the 4-tier protocol).
+
+## Operational & protocol discipline
+
+- Persistent MQTT sessions (`--persistent` on `agentbus start`, default
+  on) — broker queues QoS1 messages for a disconnected daemon until
+  reconnect.
+- Daemons move to systemd user units with `loginctl enable-linger` —
+  survive logout, auto-restart, proper logs. The `nohup` pattern we
+  shipped on day one was too fragile (SIGHUP on logout killed it silent).
+- CHANGELOG.md with explicit "wire-compat" bullet per release. Any
+  envelope shape / topic layout / retain-QoS default / MCP tool
+  contract change is called out so a rolling fleet knows whether a
+  full restart is needed.
