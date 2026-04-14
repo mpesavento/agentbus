@@ -55,6 +55,15 @@ def _resolve_outbox(explicit: str | None, agent_id: str) -> str | None:
 @click.option("--broker", default="localhost", show_default=True)
 @click.option("--port", default=1883, show_default=True)
 @click.option("--content-type", default="text/plain", show_default=True)
+@click.option(
+    "--priority",
+    type=click.Choice(["low", "normal", "high"], case_sensitive=False),
+    default="normal",
+    show_default=True,
+    help="Envelope priority. `high` is the gate for reactive wake wrappers "
+         "(examples/claude-code-wake.sh, examples/openclaw-wake.sh) — use "
+         "sparingly: it triggers a real reasoning turn on the recipient.",
+)
 @click.option("--reply-to", "reply_to", default=None, help="Agent id for the peer to reply to (defaults to unset)")
 @click.option(
     "--outbox",
@@ -75,6 +84,7 @@ def send(
     broker: str,
     port: int,
     content_type: str,
+    priority: str,
     reply_to: str | None,
     outbox: str | None,
 ) -> None:
@@ -105,6 +115,7 @@ def send(
             subject=subject,
             body=body,
             content_type=content_type,
+            priority=priority.lower(),
             reply_to=reply_to,
             outbox_path=resolved_outbox,
         ))
