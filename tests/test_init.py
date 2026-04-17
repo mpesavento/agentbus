@@ -125,6 +125,12 @@ class TestAgentIdValidation:
     def test_invalid_with_slash(self):
         assert self._invoke("foo/bar") == 2
 
+    def test_reserved_broadcast(self):
+        assert self._invoke("broadcast") == 2
+
+    def test_reserved_system(self):
+        assert self._invoke("system") == 2
+
 
 class TestHostTypeChoices:
     def test_cc_accepted(self):
@@ -386,3 +392,44 @@ class TestExitCodes:
                 "init", "--agent-id", "test", "--broker", "tailscale",
             ])
         assert result.exit_code == 1
+
+
+class TestStepDoctor:
+    """Regression: _step_doctor must build a valid subprocess list even when
+    swarmbus is not on PATH (the old fallback produced a single string like
+    'python3 -m swarmbus' as a list element, which subprocess.run passes
+    verbatim as the executable name and raises FileNotFoundError)."""
+
+    def test_doctor_uses_swarmbus_on_path(self):
+        from swarmbus.cli import _step_doctor
+        captured = []
+
+        def fake_run_step(label, cmd, dry_run):
+            captured.append(cmd)
+            return True
+
+        with patch("swarmbus.cli.shutil.which", return_value="/usr/bin/swarmbus"), \
+             patch("swarmbus.cli._run_step", side_effect=fake_run_step):
+            _step_doctor("sparrow", dry_run=True)
+
+        assert captured[0][0] == "/usr/bin/swarmbus"
+        assert "--agent-id" in captured[0]
+
+    def test_doctor_fallback_is_list_not_string(self):
+        """When swarmbus not on PATH, cmd must be a proper list of strings."""
+        from swarmbus.cli import _step_doctor
+        captured = []
+
+        def fake_run_step(label, cmd, dry_run):
+            captured.append(cmd)
+            return True
+
+        with patch("swarmbus.cli.shutil.which", return_value=None), \
+             patch("swarmbus.cli._run_step", side_effect=fake_run_step):
+            _step_doctor("sparrow", dry_run=True)
+
+        cmd = captured[0]
+        # Must be a proper list — no element should contain spaces
+        for element in cmd:
+            assert " " not in element, f"Element {element!r} contains space — subprocess would fail"
+        assert "doctor" in cmd

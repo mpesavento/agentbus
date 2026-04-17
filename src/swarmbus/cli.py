@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re as _re
 import shlex
 import shutil
+import subprocess
 import sys
 
 import aiomqtt
@@ -750,11 +752,11 @@ def mcp_server(agent_id: str, broker: str, port: int) -> None:
 # swarmbus init
 # ---------------------------------------------------------------------------
 
-import re as _re_init
 from .platform import detect_platform, find_repo_root, resolve_broker_addr
 
 
-_AGENT_ID_RE = _re_init.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+_AGENT_ID_RE = _re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+_RESERVED_AGENT_IDS = frozenset({"broadcast", "system"})
 
 
 def _derive_invoke(host_type: str, agent_id: str, repo_root: str | None) -> str | None:
@@ -793,7 +795,7 @@ def _run_step(label: str, cmd: list[str], dry_run: bool) -> bool:
         click.echo(f"    would run: {' '.join(cmd)}")
         return True
 
-    result = _sp.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
         click.echo(click.style("✓", fg="green"))
         return True
@@ -921,15 +923,19 @@ def _step_wake_wrapper(
         click.echo("    hint: pass --invoke <path/to/wake.sh agent-id> to enable reactive wake")
         return True  # warn, not fail
 
-    # invoke may be "<path> <agent-id>" — extract path
-    invoke_path = invoke.split()[0]
+    # invoke may be "<path> <agent-id>" — extract path using shlex so quoted
+    # paths with spaces are handled correctly.
     from pathlib import Path as _Path
+    try:
+        invoke_path = shlex.split(invoke)[0]
+    except ValueError:
+        invoke_path = invoke.split()[0]
     p = _Path(invoke_path)
     if not p.exists():
         click.echo(click.style(f"⚠ script not found: {invoke_path}", fg="yellow"))
         click.echo("    hint: use --invoke to point to a different wake wrapper path")
         return True  # warn, not fail
-    if not _Path(invoke_path).stat().st_mode & 0o100:
+    if not p.stat().st_mode & 0o100:
         click.echo(click.style(f"⚠ not executable: {invoke_path}", fg="yellow"))
         click.echo(f"    hint: chmod +x {invoke_path}")
         return True
@@ -970,8 +976,14 @@ def _step_plugin(
 def _step_doctor(agent_id: str, dry_run: bool) -> bool:
     """Step 6: run swarmbus doctor and surface the result."""
     label = "Doctor"
-    swarmbus_bin = shutil.which("swarmbus") or sys.executable + " -m swarmbus"
-    return _run_step(label, [swarmbus_bin, "doctor", "--agent-id", agent_id], dry_run)
+    swarmbus_on_path = shutil.which("swarmbus")
+    if swarmbus_on_path:
+        cmd = [swarmbus_on_path, "doctor", "--agent-id", agent_id]
+    else:
+        # Fallback: run as a Python module. sys.executable is always a single
+        # path, never a compound string, so it's safe as a list element.
+        cmd = [sys.executable, "-m", "swarmbus", "doctor", "--agent-id", agent_id]
+    return _run_step(label, cmd, dry_run)
 
 
 @main.command()
@@ -1019,7 +1031,12 @@ def init(
     if not _AGENT_ID_RE.match(agent_id):
         raise click.BadParameter(
             f"{agent_id!r} is not valid. Use lowercase letters, digits, hyphens, "
-            "underscores; must start with a letter or digit.",
+            "underscores (1–63 chars); must start with a letter or digit.",
+            param_hint="--agent-id",
+        )
+    if agent_id in _RESERVED_AGENT_IDS:
+        raise click.BadParameter(
+            f"{agent_id!r} is reserved and cannot be used as an agent id.",
             param_hint="--agent-id",
         )
 
