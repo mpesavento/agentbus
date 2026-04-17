@@ -7,16 +7,17 @@ When agents exchange messages, the human operator needs two things that often ge
 
 These are different problems with different answers. This doc separates them.
 
-## Principle: always archive, surface selectively
+## Principle: always archive, surface selectively — but default to visible
 
 - **Archive is mandatory.** Every inbound and outbound message should land in a durable file the user can read. Non-negotiable.
-- **Notification is conditional.** Most messages deserve no user-facing surface beyond the archive. A few deserve inline mention. Rare ones warrant an unprompted push.
+- **Notification is conditional, but silence requires justification.** The human operator should know about cross-agent coordination. Without Tier 2.5 (mention at next interaction), normal-priority traffic is invisible unless the operator happens to watch the archive. Default: surface at next interaction. Reserve silent (Tier 4) only for pure acks and heartbeat pings.
+- **Tier 3 (push) is reserved for genuine urgency.** Overuse trains the operator to ignore it.
 
 If you only implement one tier, make it archive. A silent system with a complete log is recoverable. A loud system without a log is not.
 
 ---
 
-## The four notification tiers
+## The five notification tiers
 
 ### Tier 1 — archive (always)
 
@@ -138,18 +139,37 @@ clear in about 10 minutes.
 ---
 ```
 
+### Archive responsibility split
+
+**Sender owns the shared store. Receiver owns only the local pair log.**
+
+| Role | Shared store | Local pair log |
+|------|-------------|----------------|
+| Sender | ✅ Write full body | ✅ Write full body |
+| Receiver | ❌ Do NOT write | ✅ Write full body |
+
+If both agents write to the shared store on send AND receive, every message appears twice. The sender is the only party that knows the exact body as transmitted — the receiver should write verbatim what it received, not a paraphrase.
+
+**Raw copies only.** Write the verbatim message body — no paraphrasing, no summarizing, no truncating. The pair log is a reconstruction artifact; it only has integrity if it's byte-for-byte what was sent.
+
+**Timestamps: always your clock.** Use `$(date '+%Y-%m-%d %H:%M %Z')` at the moment of archiving — never copy the peer's timestamp. Peer clocks may be UTC, unlabeled, or drifted. The archive timestamp is when you processed the message, not when it was sent.
+
+**One append per message, ever.** Do not re-archive the same message as a summary or context when replying. Each message gets exactly one entry in each log.
+
 ### When to write
 
-- **On send:** agent appends its outbound message to the pair log before (or immediately after) calling `swarmbus send`. The `SWARMBUS_OUTBOX` env var already archives to the outbox file; pair-log appending is an additional step the agent does in its own logic.
-- **On receive:** agent appends the inbound message to the pair log when processing its inbox, after archiving to the shared store.
+- **On send:** sender appends full outbound body to (1) the shared store and (2) local pair log. The `SWARMBUS_OUTBOX` env var already handles the outbox file; the shared store and pair log are separate appends in the agent's logic.
+- **On receive:** receiver appends full inbound body to (1) local pair log only. The shared store is the sender's responsibility — do not write it on receive.
+- **Clear inbox immediately after archiving** — before replying, before anything else. If an inbox-watch cron is running, a delayed clear produces a duplicate notification.
 
 ### Checklist addition
 
 Add to the minimal wiring checklist:
 
 - [ ] Create `logs/comms-<peer>.md` for each peer this agent communicates with.
-- [ ] On send: append full outbound body to pair log + shared store.
-- [ ] On receive: append full inbound body to pair log + shared store.
+- [ ] On send: append full outbound body to shared store + local pair log.
+- [ ] On receive: append full inbound body to local pair log only (shared store is the sender's responsibility).
+- [ ] Clear inbox immediately after archiving the received message.
 
 ### Tier 2 — inline narration (when user is actively in conversation)
 
@@ -161,6 +181,16 @@ If the user is mid-chat with this agent and this agent pings a peer as part of t
 > Agent: "Coder says it's stuck on a DB migration; she's rerunning now."
 
 Zero extra channels. Folds into the existing conversation. The user sees the collaboration happen in real time because they're already paying attention to this channel.
+
+### Tier 2.5 — mention at next interaction (normal priority, user not mid-chat)
+
+If a peer message arrives when the user is not actively chatting, surface it at the start of the next interaction instead of sending an unprompted push:
+
+> "Coder sent a message about the deploy while you were away — DB migration stalled, she's rerunning it."
+
+This closes the human-out-of-loop gap. Without Tier 2.5, normal-priority cross-agent coordination is invisible to the operator unless they happen to watch the archive file. With it, the operator always learns about peer traffic at the next natural interaction point, without being paged.
+
+Reserve Tier 4 (silent) for pure acknowledgments and heartbeat pings. Everything else should surface at Tier 2.5 or higher.
 
 ### Tier 3 — proactive push on high priority
 
@@ -286,8 +316,9 @@ When wiring up a new agent on swarmbus:
 
 - [ ] Set `SWARMBUS_OUTBOX` for the agent's process (or pass `outbox_path=` in Python).
 - [ ] Run `swarmbus start --inbox <path>` under a persistent supervisor (systemd-user, byobu, tmux, supervisord).
-- [ ] Document the agent's Tier 2 (inline) and Tier 3 (push) behaviour in its identity file (CLAUDE.md / AGENTS.md / etc).
+- [ ] Document the agent's Tier 2 (inline), Tier 2.5 (mention at next interaction), and Tier 3 (push) behaviour in its identity file (CLAUDE.md / AGENTS.md / etc).
+- [ ] Archive responsibility: on send, write to shared store + local pair log. On receive, write to local pair log only. Clear inbox immediately after archiving.
 - [ ] Test: send yourself a test message and confirm it appears in the outbox. Have a peer send you a test and confirm it appears in the inbox.
-- [ ] Test Tier 3: send `priority: high` and verify the user surface fires.
+- [ ] Test Tier 3: send `priority: high` and verify the user surface fires before any agent session spawns (wake wrapper curl, not session logic).
 
-If all five boxes are checked, the agent has a complete archive and a disciplined notification surface.
+If all six boxes are checked, the agent has a complete archive and a disciplined notification surface.

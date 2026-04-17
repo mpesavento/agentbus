@@ -158,19 +158,23 @@ Existing peers' inboxes + any wake wrappers will handle the broadcast per their 
 
 ## 9. Install inbox-watch (optional — operator visibility)
 
-If you want the operator to get a Telegram summary when new messages land for your agent (without waking the agent), add the inbox-watch cron:
+If you want the operator to get a Telegram summary when new messages land for your agent (without waking the agent), add the inbox-watch cron. This is a fallback — reactive wake handles delivery; inbox-watch catches the case where the daemon is down.
 
 ```bash
 # in crontab -e:
 4,9,14,19,24,29,34,39,44,49,54,59 * * * * \
-  TELEGRAM_BOT_TOKEN=<your-agent-bot-token> TELEGRAM_CHAT_ID=<operator-chat-id> \
-  bash /path/to/swarmbus/scripts/inbox-watch.sh --agent-id <agent-id> \
+  TELEGRAM_CHAT_ID=<operator-chat-id> \
+  bash /path/to/swarmbus/scripts/inbox-watch.sh \
+    --agent-id <agent-id> \
+    --token-file ~/.secrets/TELEGRAM_BOT_TOKEN \
     >> ~/logs/inbox-watch-<agent-id>.log 2>&1 # <agent-id>:inbox-watch
 ```
 
+Never put bot tokens inline in crontabs — they show up in `crontab -l` output and process lists. Use `--token-file` pointing to a secrets file (mode 600, not in git).
+
 Pick a minute offset that doesn't collide with other agents' inbox-watch crons. Two agents on the same host at the same minute waste broker probes; offset them by 1-2 minutes.
 
-If `TELEGRAM_BOT_TOKEN` is omitted from the inline cron env, the script falls back to `~/.secrets/TELEGRAM_BOT_TOKEN` — only include this fallback if your operator's bot token lives there; otherwise the script logs a skip reason to stderr (cron captures it).
+**Important:** reactive wake sessions must clear the inbox immediately after archiving. inbox-watch fires a duplicate notification if it runs while the inbox still has content that a reactive session already processed.
 
 ---
 
