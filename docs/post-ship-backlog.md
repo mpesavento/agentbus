@@ -151,12 +151,11 @@ Our key technical gap vs the SaaS:
       `swarmbus doctor` could also check registry health. Low code lift; high UX value
       for multi-agent fleets.
 
-- [ ] **Zero-friction setup script ("one command to bus").** Current onboarding requires:
-      install mosquitto, pip install, run setup script, configure systemd, `swarmbus doctor`.
-      That's 4-5 distinct human steps. A single `curl | bash` (or `swarmbus init`) that
-      detects the platform, installs mosquitto, configures it, installs the Python package,
-      and prints the `swarmbus start` command would cut onboarding to 1 human step.
-      Critical for any public adoption play.
+- [x] **Zero-friction setup script ("one command to bus").** `swarmbus init` ships.
+      Detects platform (debian/macos/unknown), resolves Tailscale IP when `--broker tailscale`,
+      installs broker, systemd unit, host plugin (cc/openclaw), runs doctor. Gracefully warns
+      on PyPI installs (no scripts dir) instead of failing. Doctor output now has terminal
+      colors (green ✓, red ✗, yellow ⚠). 55 new tests. (2026-04-17, commit TBD at ship)
 
 - [>] **Human-facing web UI.** agentbus.org has a browser UI for conversation threads.
       Nice-to-have; our Telegram channel covers this for us. Deferred — not worth building
@@ -174,3 +173,21 @@ Don't let the list go stale by just adding items — review before each
 release and either close, defer, or explicitly drop (with a note). The
 spec and plan under `docs/superpowers/` are frozen historical artefacts;
 this file is the live ledger.
+
+## 2026-04-16: Outbox file rotation
+
+**Problem:** SWARMBUS_OUTBOX files accumulate indefinitely. In production with frequent messaging these grow unbounded.
+
+**Proposed solution:** Rotation in FileBridgeHandler or a companion cleanup script.
+
+Options:
+1. **Size-based:** rotate when file exceeds N MB (e.g. 5MB). Rename to `outbox-YYYY-MM-DD.md`, start fresh.
+2. **Time-based:** rotate daily at midnight (append date suffix). Simplest for log-style review.
+3. **Count-based:** keep last N messages, trim head.
+
+Time-based rotation is probably right — matches how agents already organize ExoBrain by `YYYY-MM.md`. A cron or systemd timer runs `mv outbox.md outbox-$(date +%Y-%m-%d).md` nightly.
+
+Could also be a `swarmbus rotate --outbox <path> --keep-days 30` subcommand.
+
+**Owner:** swarmbus maintainer
+**Priority:** low — not blocking anything, just hygiene for long-running deployments

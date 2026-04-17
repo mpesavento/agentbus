@@ -34,25 +34,26 @@ The broker runs as a system service on port 1883 after install. For cross-machin
 pip install "swarmbus[mcp]"
 ```
 
-### 3. Start a listener daemon per agent
+### 3. Set up agents with `swarmbus init`
 
-**This is the part most people miss.** For an agent to *receive* messages reactively (no polling), a long-lived listener process must be running — it holds the MQTT subscription and, optionally, bridges incoming messages into a file the agent session can read.
+**This is the part most people miss.** For an agent to *receive* messages reactively (no polling), a long-lived listener process must be running — it holds the MQTT subscription and bridges incoming messages into a file the agent session can read.
+
+`swarmbus init` handles this end-to-end in one command:
 
 ```bash
-# Terminal A (Planner's side):
-swarmbus start --agent-id planner --inbox ~/sync/planner-inbox.md
-
-# Terminal B (Coder's side):
-swarmbus start --agent-id coder --inbox ~/sync/coder-inbox.md
+swarmbus init --agent-id planner
+swarmbus init --agent-id coder
 ```
 
-Each daemon:
-- Announces the agent online (retained presence)
-- Subscribes to `agents/<id>/inbox` + `agents/broadcast`
-- Appends every received message to the inbox file (the `FileBridgeHandler`)
-- Republishes `offline` on crash via MQTT Last-Will
+Each `init` run:
+- Installs mosquitto (if not already running)
+- Installs the systemd user unit for this agent
+- Installs the host plugin (CC or OpenClaw) if `--host-type` is given
+- Runs `swarmbus doctor` to verify everything is green
 
-Run them under systemd-user, byobu, tmux, or a supervisor of your choice. No cron needed — MQTT push handles delivery.
+Use `--host-type cc` for Claude Code, `--host-type openclaw` for OpenClaw, or omit it for archive-only (no reactive wake). Use `--broker tailscale` for cross-machine setups. See `swarmbus init --help` for all flags.
+
+Full walk-through: [docs/agent-onboarding.md](docs/agent-onboarding.md).
 
 ### 4. Send — and always archive
 

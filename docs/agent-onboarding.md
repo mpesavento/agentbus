@@ -1,124 +1,34 @@
 # Agent onboarding — bringing a new agent onto swarmbus
 
-This is the linear walk-through for getting a new agent (Claude Code, OpenClaw, or a custom shell/Python agent) fully wired into swarmbus: receiving messages, archiving both directions, and waking reactively on `priority=high`.
+## Prerequisites
 
-Follow the steps in order. After each step, either run `swarmbus doctor --agent-id <me>` for the automated checklist, or do the verification shown inline.
+- Python 3.9+
+- `pip` installed
+- Systemd user services available (`loginctl enable-linger $(whoami)` so daemons survive logout)
 
-If any step fails, jump to the README's [Troubleshooting](../README.md#troubleshooting) section.
-
----
-
-## 0. Prerequisites
-
-- A reachable mosquitto broker. For a single-host setup, install with `bash scripts/setup-mosquitto.sh` — binds to `127.0.0.1:1883`. For multi-host (Tailscale-joined peers), use `bash scripts/setup-mosquitto.sh --tailscale` and see [cross-machine-tailscale.md](cross-machine-tailscale.md).
-- Python 3.9+ with `pip` installed.
-- Systemd user services available (`loginctl show-user $(whoami) | grep Linger`; enable with `loginctl enable-linger $(whoami)` so daemons survive logout).
-
----
-
-## 1. Pick an agent id
-
-Constraints: lowercase, alphanumerics + `-` + `_`, 1–64 chars. Not `broadcast` or `system` (reserved).
-
-If you're writing docs or examples, use **role-based names** (`planner`, `coder`, `reviewer`) — NOT your real operator identities. Operator-specific names (`sparrow`, `wren`, `ops-bot-1`) are fine for your own deployment but shouldn't leak into public repos. See the [post-ship-backlog](post-ship-backlog.md) for why.
+## One-command setup
 
 ```bash
-AGENT_ID=my-agent    # change me
+pip install "swarmbus[mcp]"
+swarmbus init --agent-id <your-id> --host-type <cc|openclaw|none>
+```
+
+That's it. `init` installs the broker, configures the systemd daemon, installs the host plugin, and runs `swarmbus doctor` to verify. Use `--broker tailscale` for cross-machine Tailscale setups. See `swarmbus init --help` for all options.
+
+After init completes, set the outbox env var so every send archives automatically:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc:
+export SWARMBUS_OUTBOX_$(echo "<your-id>" | tr 'a-z-' 'A-Z_')="$HOME/sync/<your-id>-outbox.md"
 ```
 
 ---
 
-## 2. Install swarmbus
+## Agent id constraints
 
-```bash
-pip install "swarmbus[mcp]"              # or
-pip install -e /path/to/swarmbus         # editable, for contributors
-```
+Lowercase, alphanumerics + `-` + `_`, 1–64 chars, starts with letter or digit. Not `broadcast` or `system` (reserved).
 
-Verify:
-
-```bash
-swarmbus --help
-# expect: Usage: swarmbus [OPTIONS] COMMAND [ARGS]...
-```
-
----
-
-## 3. Pick your host type
-
-The receive pattern differs by host. Pick one:
-
-| Host | Wake wrapper | Setup script |
-|---|---|---|
-| **Claude Code** (claude.ai/code or the CLI) | `examples/claude-code-wake.sh <agent-id>` | `scripts/setup-cc-plugin.sh <agent-id>` |
-| **OpenClaw** | `examples/openclaw-wake.sh <openclaw-agent-name>` | `scripts/setup-openclaw-plugin.sh <agent-id>` |
-| **Shell / cron / Python framework / other** | none (archive-only is fine) | skip — use the CLI directly |
-
-Run the setup script if applicable:
-
-```bash
-bash scripts/setup-cc-plugin.sh "$AGENT_ID"   # for Claude Code
-# OR
-bash scripts/setup-openclaw-plugin.sh "$AGENT_ID"   # for OpenClaw
-```
-
-The script installs the behavioural skill at the correct path for your host. It does NOT install the listener daemon — that's the next step.
-
----
-
-## 4. Install the listener daemon under systemd
-
-Don't use `nohup` — it dies on SIGHUP when your shell closes. Use the shipped systemd-user template:
-
-```bash
-bash scripts/install-systemd.sh "$AGENT_ID" \
-  --invoke "$HOME/projects/swarmbus/examples/claude-code-wake.sh $AGENT_ID"
-#   for OpenClaw, use:
-#   --invoke "$HOME/projects/swarmbus/examples/openclaw-wake.sh <openclaw-agent-name>"
-#   omit --invoke entirely to run as archive-only (no reactive wake)
-```
-
-The script:
-1. Renders the systemd template with your paths.
-2. Installs at `~/.config/systemd/user/swarmbus-<id>.service`.
-3. `systemctl --user daemon-reload && enable && restart`.
-4. Prints the unit status.
-5. Runs `swarmbus doctor` automatically for verification.
-
-If `loginctl show-user $(whoami) | grep Linger` shows `Linger=no`, run `loginctl enable-linger $(whoami)` so your daemon survives your shell logging out.
-
----
-
-## 5. Configure outbox archive
-
-Set the outbox env var so every `swarmbus send` archives outbound messages symmetrically with the inbox:
-
-```bash
-# in your shell rc (.bashrc, .zshrc):
-export SWARMBUS_OUTBOX="$HOME/sync/{agent_id}-outbox.md"
-# OR per-agent scoped (safer in multi-agent shells):
-export SWARMBUS_OUTBOX_$(echo "$AGENT_ID" | tr 'a-z-' 'A-Z_')="$HOME/sync/${AGENT_ID}-outbox.md"
-```
-
-The `install-systemd.sh` step above already sets the per-agent scoped env var in the systemd unit — this step covers your *interactive* shell so CLI sends archive too.
-
----
-
-## 6. Run the doctor
-
-```bash
-swarmbus doctor --agent-id "$AGENT_ID"
-```
-
-Every line should be green (`✓`). Warnings (`⚠`) are acceptable but review them. Any red (`✗`) blocks onboarding — use the inline `fix:` hint. The doctor catches:
-
-1. swarmbus CLI version + install path
-2. broker reachable
-3. systemd user unit active
-4. **daemon library freshness** — after any `pip install -U`, the running daemon may still hold old code in memory. Doctor flags this explicitly (the 2026-04-14 priority-field incident was exactly this).
-5. `--invoke` wired (if you want reactive wake)
-6. outbox env resolvable
-7. peer discovery
+For docs and examples, use role-based names (`planner`, `coder`) — not operator identities. The latter are fine for your own deployment but shouldn't appear in public repos.
 
 ---
 

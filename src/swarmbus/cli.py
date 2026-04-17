@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shlex
+import shutil
 import sys
 
 import aiomqtt
@@ -686,10 +687,14 @@ def doctor(agent_id: str | None, broker: str, port: int) -> None:
 
     # Render
     click.echo(f"\n[doctor] swarmbus health check for agent-id={agent_id_resolved}\n")
-    icon = {"ok": "✓", "warn": "⚠", "fail": "✗", "skip": "·"}
+    icon_char = {"ok": "✓", "warn": "⚠", "fail": "✗", "skip": "·"}
+    color_map = {"ok": "green", "warn": "yellow", "fail": "red", "skip": None}
     fails = warns = 0
     for i, (label, status, hint) in enumerate(results, 1):
-        click.echo(f"  [{icon[status]}] {i}. {label}")
+        char = icon_char[status]
+        fg = color_map[status]
+        line = f"  [{char}] {i}. {label}"
+        click.echo(click.style(line, fg=fg, bold=(status == "fail")))
         if hint:
             click.echo(f"        fix: {hint}")
         if status == "fail":
@@ -739,3 +744,406 @@ def mcp_server(agent_id: str, broker: str, port: int) -> None:
     """Start the MCP sidecar for this agent."""
     from .mcp_server import run_mcp_server
     run_mcp_server(agent_id=agent_id, broker=broker, port=port)
+
+
+# ---------------------------------------------------------------------------
+# swarmbus init
+# ---------------------------------------------------------------------------
+
+import re as _re_init
+from .platform import detect_platform, find_repo_root, resolve_broker_addr
+
+
+_AGENT_ID_RE = _re_init.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+
+
+def _derive_invoke(host_type: str, agent_id: str, repo_root: str | None) -> str | None:
+    """Derive the --invoke wrapper path from host_type and repo_root.
+
+    Returns None when:
+    - host_type is "none" (archive-only, no reactive wake needed)
+    - repo_root is None (PyPI install; user must supply --invoke manually)
+    """
+    if repo_root is None or host_type == "none":
+        return None
+    if host_type == "cc":
+        return f"{repo_root}/examples/claude-code-wake.sh {agent_id}"
+    if host_type == "openclaw":
+        return f"{repo_root}/examples/openclaw-wake.sh {agent_id}"
+    return None
+
+
+def _run_step(label: str, cmd: list[str], dry_run: bool) -> bool:
+    """Run a single init step, printing progress and result.
+
+    In dry-run mode prints the command instead of executing it.
+    On failure prints captured stdout + stderr so the operator sees
+    what went wrong (setup scripts emit to stdout, not just stderr).
+
+    Returns True on success, False on failure.
+    """
+    import subprocess as _sp
+
+    padding = max(0, 40 - len(label))
+    dots = "." * padding
+    click.echo(f"  {label} {dots} ", nl=False)
+
+    if dry_run:
+        click.echo(click.style("(dry-run)", fg="cyan"))
+        click.echo(f"    would run: {' '.join(cmd)}")
+        return True
+
+    result = _sp.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        click.echo(click.style("✓", fg="green"))
+        return True
+    else:
+        click.echo(click.style("✗ failed", fg="red", bold=True))
+        if result.stdout.strip():
+            click.echo(f"    stdout: {result.stdout.strip()}")
+        if result.stderr.strip():
+            click.echo(f"    stderr: {result.stderr.strip()}")
+        return False
+
+
+def _step_broker(
+    plt: str,
+    broker: str,
+    scripts_dir: str,
+    dry_run: bool,
+    yes: bool,
+) -> bool:
+    """Step 1: install / verify the MQTT broker."""
+    label = "Broker"
+
+    if plt == "debian":
+        # resolve_broker_addr already called in init() before reaching here;
+        # broker here is still the raw value. Pass the right flag to the script.
+        if broker == "tailscale":
+            cmd = [f"{scripts_dir}/setup-mosquitto.sh", "--tailscale"]
+        else:
+            cmd = [f"{scripts_dir}/setup-mosquitto.sh"]
+        return _run_step(label, cmd, dry_run)
+
+    if plt == "macos":
+        if shutil.which("brew"):
+            if not yes and not dry_run:
+                click.echo(f"  {label}: install mosquitto via brew? [Y/n] ", nl=False)
+                ans = sys.stdin.readline().strip().lower()
+                if ans in ("n", "no"):
+                    click.echo(click.style(f"  {label} ... skipped (no broker)", fg="yellow"))
+                    return True
+            return _run_step(
+                label,
+                ["brew", "install", "mosquitto"],
+                dry_run,
+            ) and _run_step(
+                "Broker start",
+                ["brew", "services", "start", "mosquitto"],
+                dry_run,
+            )
+        else:
+            # No brew — print manual instructions
+            padding = max(0, 40 - len(label))
+            dots = "." * padding
+            click.echo(f"  {label} {dots} ", nl=False)
+            click.echo(click.style("⚠ manual install needed", fg="yellow"))
+            click.echo("    Install mosquitto manually:")
+            click.echo("      https://mosquitto.org/download/")
+            click.echo("    Then start it and press Enter to continue.")
+            if not yes and not dry_run:
+                sys.stdin.readline()
+            return True
+
+    # Unknown platform — skip with warning
+    padding = max(0, 40 - len(label))
+    dots = "." * padding
+    click.echo(f"  {label} {dots} ", nl=False)
+    click.echo(click.style("⚠ unknown platform — skipped", fg="yellow"))
+    return True
+
+
+def _step_package(dry_run: bool) -> bool:
+    """Step 2: verify swarmbus package is importable."""
+    from . import __version__
+    label = "Package"
+    padding = max(0, 40 - len(label))
+    dots = "." * padding
+    click.echo(f"  {label} {dots} ", nl=False)
+    try:
+        import swarmbus as _sb
+        from pathlib import Path as _Path
+        pkg_path = _Path(_sb.__file__).parent
+        click.echo(click.style(f"✓ swarmbus {__version__} at {pkg_path}", fg="green"))
+        return True
+    except ImportError as exc:
+        click.echo(click.style(f"⚠ could not import swarmbus: {exc}", fg="yellow"))
+        click.echo("    hint: pip install swarmbus")
+        return True  # warn only — don't fail init on self-check
+
+
+def _step_systemd(
+    agent_id: str,
+    broker_addr: str,
+    inbox: str,
+    invoke: str | None,
+    scripts_dir: str,
+    dry_run: bool,
+) -> bool:
+    """Step 3: install the systemd user unit via install-systemd.sh."""
+    label = "Systemd unit"
+    cmd = [f"{scripts_dir}/install-systemd.sh", agent_id,
+           "--broker", broker_addr,
+           "--inbox", inbox]
+    if invoke:
+        cmd += ["--invoke", invoke]
+    return _run_step(label, cmd, dry_run)
+
+
+def _step_wake_wrapper(
+    invoke: str | None,
+    dry_run: bool,
+) -> bool:
+    """Step 4: verify the wake wrapper script exists and is executable.
+
+    This is a verification step — the script itself is not installed here,
+    it is referenced by the systemd unit's --invoke arg. When invoke is None
+    (PyPI install with no --invoke supplied, or host-type=none), we warn
+    instead of failing so the rest of init can complete.
+    """
+    label = "Wake wrapper"
+    padding = max(0, 40 - len(label))
+    dots = "." * padding
+    click.echo(f"  {label} {dots} ", nl=False)
+
+    if invoke is None:
+        click.echo(click.style("⚠ not wired (no --invoke; no reactive wake)", fg="yellow"))
+        click.echo("    hint: pass --invoke <path/to/wake.sh agent-id> to enable reactive wake")
+        return True  # warn, not fail
+
+    # invoke may be "<path> <agent-id>" — extract path
+    invoke_path = invoke.split()[0]
+    from pathlib import Path as _Path
+    p = _Path(invoke_path)
+    if not p.exists():
+        click.echo(click.style(f"⚠ script not found: {invoke_path}", fg="yellow"))
+        click.echo("    hint: use --invoke to point to a different wake wrapper path")
+        return True  # warn, not fail
+    if not _Path(invoke_path).stat().st_mode & 0o100:
+        click.echo(click.style(f"⚠ not executable: {invoke_path}", fg="yellow"))
+        click.echo(f"    hint: chmod +x {invoke_path}")
+        return True
+
+    click.echo(click.style(f"✓ {invoke}", fg="green"))
+    return True
+
+
+def _step_plugin(
+    agent_id: str,
+    host_type: str,
+    broker: str,
+    scripts_dir: str,
+    skip_plugin: bool,
+    dry_run: bool,
+) -> bool:
+    """Step 5: install the host plugin (Claude Code or OpenClaw)."""
+    label = "Host plugin"
+    padding = max(0, 40 - len(label))
+    dots = "." * padding
+
+    if skip_plugin or host_type == "none":
+        click.echo(f"  {label} {dots} ", nl=False)
+        click.echo(click.style("· skipped", fg=None))
+        return True
+
+    if host_type == "cc":
+        # positional args: <agent-id> [broker-host]
+        return _run_step(label, [f"{scripts_dir}/setup-cc-plugin.sh", agent_id, broker], dry_run)
+    if host_type == "openclaw":
+        return _run_step(label, [f"{scripts_dir}/setup-openclaw-plugin.sh", agent_id, broker], dry_run)
+
+    click.echo(f"  {label} {dots} ", nl=False)
+    click.echo(click.style("· skipped", fg=None))
+    return True
+
+
+def _step_doctor(agent_id: str, dry_run: bool) -> bool:
+    """Step 6: run swarmbus doctor and surface the result."""
+    label = "Doctor"
+    swarmbus_bin = shutil.which("swarmbus") or sys.executable + " -m swarmbus"
+    return _run_step(label, [swarmbus_bin, "doctor", "--agent-id", agent_id], dry_run)
+
+
+@main.command()
+@click.option("--agent-id", required=True,
+              help="Agent identifier (lowercase alphanumeric, hyphens, underscores)")
+@click.option(
+    "--host-type",
+    type=click.Choice(["cc", "openclaw", "none"], case_sensitive=False),
+    default="none",
+    show_default=True,
+    help="Host type: cc (Claude Code), openclaw, none (archive-only).",
+)
+@click.option("--broker", default="localhost", show_default=True,
+              help="Broker address. Use 'tailscale' to auto-resolve Tailscale IP.")
+@click.option("--invoke", "invoke_override", default=None,
+              help="Override the invoke wrapper path passed to install-systemd.")
+@click.option("--inbox", default=None,
+              help="Inbox file path. Defaults to ~/sync/<agent-id>-inbox.md.")
+@click.option("--skip-broker", is_flag=True, help="Skip broker install.")
+@click.option("--skip-plugin", is_flag=True, help="Skip host plugin install.")
+@click.option("--dry-run", is_flag=True, help="Print what would run without executing.")
+@click.option("--yes", is_flag=True, help="Non-interactive; accept all prompts.")
+def init(
+    agent_id: str,
+    host_type: str,
+    broker: str,
+    invoke_override: str | None,
+    inbox: str | None,
+    skip_broker: bool,
+    skip_plugin: bool,
+    dry_run: bool,
+    yes: bool,
+) -> None:
+    """One-command agent setup: broker, daemon, plugin, doctor.
+
+    \b
+    swarmbus init --agent-id sparrow
+    swarmbus init --agent-id wren --host-type openclaw
+    swarmbus init --agent-id coder --host-type cc --broker tailscale
+    swarmbus init --agent-id coder --invoke "/path/to/wake.sh coder" --skip-broker
+    """
+    from pathlib import Path as _Path
+
+    # --- Validate agent-id
+    if not _AGENT_ID_RE.match(agent_id):
+        raise click.BadParameter(
+            f"{agent_id!r} is not valid. Use lowercase letters, digits, hyphens, "
+            "underscores; must start with a letter or digit.",
+            param_hint="--agent-id",
+        )
+
+    # --- Resolve broker address (may shell out for tailscale)
+    try:
+        broker_addr = resolve_broker_addr(broker)
+    except RuntimeError as exc:
+        click.echo(click.style(f"[swarmbus init] error: {exc}", fg="red", bold=True), err=True)
+        sys.exit(1)
+
+    # --- Detect platform + repo
+    plt = detect_platform()
+    repo_root = find_repo_root()
+
+    # --- Resolve scripts dir (where the bash setup scripts live)
+    scripts_dir = f"{repo_root}/scripts" if repo_root else None
+    if scripts_dir is None and not skip_broker:
+        # Can't call setup scripts without a repo — warn and continue where possible
+        click.echo(click.style(
+            "[swarmbus init] scripts/ not found (PyPI install). "
+            "Broker install, systemd install, and plugin install require the repo. "
+            "Re-run with --skip-broker --skip-plugin and wire systemd manually, "
+            "or use an editable install: pip install -e /path/to/swarmbus",
+            fg="yellow",
+        ))
+        # Don't hard-fail — let the steps surface individual warnings
+
+    # --- Resolve inbox
+    resolved_inbox = inbox or str(_Path.home() / "sync" / f"{agent_id}-inbox.md")
+
+    # --- Derive invoke wrapper
+    if invoke_override:
+        invoke = invoke_override
+    else:
+        invoke = _derive_invoke(host_type, agent_id, repo_root)
+
+    # --- Header
+    click.echo(f"\n[swarmbus init] agent-id={agent_id} host-type={host_type} broker={broker_addr}")
+    if dry_run:
+        click.echo(click.style("  (dry run — no changes will be made)\n", fg="cyan"))
+    else:
+        click.echo("")
+
+    results: list[tuple[str, bool]] = []
+
+    # --- Step 1: Broker
+    if skip_broker:
+        padding = max(0, 40 - len("Broker"))
+        dots = "." * padding
+        click.echo(f"  Broker {dots} ", nl=False)
+        click.echo(click.style("· skipped (--skip-broker)", fg=None))
+        broker_ok = True
+    else:
+        if scripts_dir is None:
+            # No scripts dir — skip with warning
+            padding = max(0, 40 - len("Broker"))
+            dots = "." * padding
+            click.echo(f"  Broker {dots} ", nl=False)
+            click.echo(click.style("⚠ skipped (no scripts dir; PyPI install)", fg="yellow"))
+            broker_ok = True
+        else:
+            broker_ok = _step_broker(plt, broker, scripts_dir, dry_run, yes)
+
+    results.append(("Broker", broker_ok))
+
+    if not broker_ok:
+        click.echo(click.style("\n[swarmbus init] broker setup failed — aborting.", fg="red", bold=True))
+        sys.exit(1)
+
+    # --- Step 2: Package check
+    pkg_ok = _step_package(dry_run)
+    results.append(("Package", pkg_ok))
+
+    # --- Step 3: Systemd
+    if scripts_dir is None:
+        padding = max(0, 40 - len("Systemd unit"))
+        dots = "." * padding
+        click.echo(f"  Systemd unit {dots} ", nl=False)
+        click.echo(click.style("⚠ skipped (no scripts dir; PyPI install)", fg="yellow"))
+        systemd_ok = True
+    else:
+        systemd_ok = _step_systemd(agent_id, broker_addr, resolved_inbox, invoke, scripts_dir, dry_run)
+    results.append(("Systemd unit", systemd_ok))
+
+    # --- Step 4: Wake wrapper
+    wake_ok = _step_wake_wrapper(invoke, dry_run)
+    results.append(("Wake wrapper", wake_ok))
+
+    # --- Step 5: Plugin
+    if scripts_dir is None and not skip_plugin and host_type != "none":
+        padding = max(0, 40 - len("Host plugin"))
+        dots = "." * padding
+        click.echo(f"  Host plugin {dots} ", nl=False)
+        click.echo(click.style("⚠ skipped (no scripts dir; PyPI install)", fg="yellow"))
+        plugin_ok = True
+    else:
+        plugin_ok = _step_plugin(agent_id, host_type, broker_addr, scripts_dir or "", skip_plugin, dry_run)
+    results.append(("Host plugin", plugin_ok))
+
+    # --- Step 6: Doctor
+    doctor_ok = _step_doctor(agent_id, dry_run)
+    results.append(("Doctor", doctor_ok))
+
+    # --- Summary
+    failed = [name for name, ok in results if not ok]
+    click.echo("")
+    click.echo("─" * 60)
+
+    if not failed:
+        click.echo(click.style(f"✓  {agent_id} is ready.", fg="green", bold=True))
+        click.echo("")
+        upper_id = agent_id.replace("-", "_").upper()
+        click.echo("To set outbox archiving in your shell:")
+        click.echo(f'  export SWARMBUS_OUTBOX_{upper_id}="$HOME/sync/{agent_id}-outbox.md"')
+        click.echo("")
+        click.echo("The daemon is running. Your agent can now receive messages.")
+        click.echo(f"Send a test:")
+        click.echo(f"  swarmbus send --agent-id probe --to {agent_id} --subject hello --body 'init test'")
+        click.echo("─" * 60)
+        sys.exit(0)
+    else:
+        click.echo(click.style(f"✗  {len(failed)} step(s) failed: {', '.join(failed)}", fg="red", bold=True))
+        click.echo("")
+        click.echo("Fix the errors above and re-run:")
+        click.echo(f"  swarmbus init --agent-id {agent_id} --host-type {host_type} --skip-broker")
+        click.echo("─" * 60)
+        sys.exit(1)
