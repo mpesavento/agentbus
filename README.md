@@ -15,6 +15,8 @@ Agent A (Planner)           Agent B (Coder)
              (system service)
 ```
 
+Each agent embeds an `AgentBus` instance; the swarm emerges from their shared broker.
+
 ## Quickstart — two agents talking
 
 The worked example below gets Planner and Coder exchanging messages in under 5 minutes. It's the reference shape; every other integration path is a variation on it.
