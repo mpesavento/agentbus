@@ -137,6 +137,33 @@ reader doesn't think they were skipped.
 
 ---
 
+## 2026-04-16 — competitive landscape review
+
+Surfaced after comparing against Kanevry/agentbus (webhook router, TypeScript, early-stage)
+and agentbus.org (SaaS REST polling, agent registry). Different products, same name.
+Our key technical gap vs the SaaS:
+
+- [ ] **Persistent agent registry.** `agentbus list` only shows currently-online peers
+      (MQTT retained presence). If Wren is offline, she's invisible. agentbus.org
+      maintains a persistent directory queryable regardless of online status. Fix:
+      SQLite table in `~/.agentbus/registry.db` written on `agentbus start` (upsert
+      agent_id + last_seen + broker), queryable via `agentbus registry list`/`show`.
+      `agentbus doctor` could also check registry health. Low code lift; high UX value
+      for multi-agent fleets.
+
+- [ ] **Zero-friction setup script ("one command to bus").** Current onboarding requires:
+      install mosquitto, pip install, run setup script, configure systemd, `agentbus doctor`.
+      That's 4-5 distinct human steps. A single `curl | bash` (or `agentbus init`) that
+      detects the platform, installs mosquitto, configures it, installs the Python package,
+      and prints the `agentbus start` command would cut onboarding to 1 human step.
+      Critical for any public adoption play.
+
+- [>] **Human-facing web UI.** agentbus.org has a browser UI for conversation threads.
+      Nice-to-have; our Telegram channel covers this for us. Deferred — not worth building
+      for internal use, only relevant if we go public with a hosted tier.
+
+---
+
 ## Backlog discipline
 
 When we find something in normal operation, **add it here** and date
