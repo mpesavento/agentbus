@@ -65,6 +65,92 @@ sort -m ~/sync/planner-inbox.md ~/sync/planner-outbox.md
 
 This gives the user a skimmable activity trail they'll see during normal daily review — no separate tool required. The full body stays in the inbox/outbox files; the daily note is just the index.
 
+---
+
+## Pair logs — unified per-peer conversation files
+
+Inbox and outbox files are agent-centric (everything I received / everything I sent). A **pair log** is peer-centric: one file containing the full conversation between exactly two agents, both directions, in chronological order. It's the shared record that either party — or the human operator — can read to reconstruct what happened between them.
+
+### Why pair logs
+
+Inbox/outbox gives you two separate streams. For debugging a coordination failure, you want the merged view. A pair log is that merge, maintained as messages happen instead of reconstructed after the fact.
+
+### swarmbus does not write pair logs
+
+swarmbus delivers messages. Logging is the agent's responsibility. This separation keeps the transport simple and makes pair log behaviour configurable per deployment.
+
+### Naming convention
+
+Name the log file alphabetically by agent-id pair, with a hyphen separator:
+
+```
+logs/comms-coder.md       # planner's local copy of planner↔coder exchange
+logs/comms-planner.md     # coder's local copy of the same exchange
+```
+
+Alphabetical ordering (coder before planner, not by who's writing the file) ensures that if you compare the two agents' local copies, the filenames are self-consistent. For a future `ops` agent:
+
+```
+logs/comms-coder.md       # planner↔coder
+logs/comms-ops.md         # planner↔ops
+```
+
+One file per peer. N agents → N-1 files per agent. Linear growth.
+
+### Dual-write pattern
+
+Write the full message body to two locations:
+
+1. **Local workspace copy** — fast in-session access, agent-centric path:
+   ```
+   ~/agent-workspace/logs/comms-<peer>.md
+   ```
+
+2. **Shared store** — durable, cross-agent readable, searchable. Use whatever your deployment uses as the shared knowledge layer (Obsidian vault, Notion, a shared filesystem path):
+   ```
+   shared-knowledge/agent-comms/messages/YYYY-MM.md   # all pairs, one monthly file
+   ```
+
+When there are only two agents, one monthly file for all pairs is fine. When you have more agents, consider per-pair files in the shared store as well (`messages/coder-planner-2026-04.md`).
+
+### Format
+
+Full message body, chronological, both directions. Not one-liners — the local file is a complete record:
+
+```markdown
+## [2026-04-15 14:32] Planner → Coder
+**Subject:** deploy-status
+
+Is the nightly build stuck? I'm seeing a queue backlog on the dashboard.
+
+— Planner
+
+---
+
+## [2026-04-15 14:48] Coder → Planner
+**Subject:** re: deploy-status
+
+DB migration stalled on the schema change. I'm rerunning it now — should
+clear in about 10 minutes.
+
+— Coder
+
+---
+```
+
+### When to write
+
+- **On send:** agent appends its outbound message to the pair log before (or immediately after) calling `swarmbus send`. The `SWARMBUS_OUTBOX` env var already archives to the outbox file; pair-log appending is an additional step the agent does in its own logic.
+- **On receive:** agent appends the inbound message to the pair log when processing its inbox, after archiving to the shared store.
+
+### Checklist addition
+
+Add to the minimal wiring checklist:
+
+- [ ] Create `logs/comms-<peer>.md` for each peer this agent communicates with.
+- [ ] On send: append full outbound body to pair log + shared store.
+- [ ] On receive: append full inbound body to pair log + shared store.
+
 ### Tier 2 — inline narration (when user is actively in conversation)
 
 If the user is mid-chat with this agent and this agent pings a peer as part of the current task, mention it in the chat thread:
