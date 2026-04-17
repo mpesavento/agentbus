@@ -36,6 +36,18 @@ Each step has platform-specific variations (Debian vs macOS, tailscale vs local)
 - Doctor run: invoke `swarmbus doctor --agent-id <id>` and surface pass/fail
 - Output: print verified `swarmbus start` command on success
 
+### Bundled: doctor terminal colors
+
+`swarmbus doctor` currently outputs plain text. Ship colored output alongside init — they're the same polish pass and share the same output moment (doctor runs at the end of init).
+
+Use `click.style()` (already a dependency) — no new imports needed:
+- `✓` lines: `click.style("✓ ...", fg="green")`
+- `✗` lines: `click.style("✗ ...", fg="red", bold=True)`
+- `⚠` lines: `click.style("⚠ ...", fg="yellow")`
+- Respect `NO_COLOR` env var and non-TTY output (click.style handles this automatically when `color=None` — it detects TTY)
+
+File: `src/swarmbus/cli.py` doctor command — find the echo/print calls and wrap with click.style.
+
 ### Out of scope (v1)
 
 - macOS broker install (document as manual; flag clearly)
