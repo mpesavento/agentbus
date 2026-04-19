@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "swarmbus"
+name = "swarmbus-py"
 version = "0.1.2"
 description = "Reactive pub/sub messaging for AI agents via MQTT"
 readme = "README.md"
