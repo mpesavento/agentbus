@@ -63,7 +63,7 @@ One broker, many peers. Peers on the broker host reach it via `localhost`; peers
 
 1. **Tailscale installed and running on all hosts** — broker host, and every host that will run an agent. Verify with `tailscale status`; all relevant nodes should be listed, not "offline".
 2. **MagicDNS enabled** on the tailnet (optional but recommended — lets you use `host.<tailnet>.ts.net` hostnames instead of hard-coding IPs).
-3. **swarmbus installed on all hosts** (`pip install swarmbus`). The CLI is what we'll use for the tests below.
+3. **swarmbus installed on all hosts** (`pip install swarmbus-py`). The CLI is what we'll use for the tests below.
 4. **mosquitto installed on the broker host only**. The other hosts don't need it.
 5. **Firewall**: on Linux, make sure `ufw` / `iptables` isn't blocking 1883 on the Tailscale interface. Default Debian has no rules, so typically nothing to do. On macOS, the system firewall generally allows established tailnet connections automatically.
 
