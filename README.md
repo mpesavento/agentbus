@@ -1,5 +1,10 @@
 # swarmbus
 
+[![PyPI](https://img.shields.io/pypi/v/swarmbus-py)](https://pypi.org/project/swarmbus-py/)
+[![Python](https://img.shields.io/pypi/pyversions/swarmbus-py)](https://pypi.org/project/swarmbus-py/)
+[![CI](https://github.com/mpesavento/swarmbus/actions/workflows/test.yml/badge.svg)](https://github.com/mpesavento/swarmbus/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/mpesavento/swarmbus)](LICENSE)
+
 > *The buzz between your agents.*
 
 Reactive pub/sub messaging for AI agents — no polling, instant delivery. Runs on [mosquitto](https://mosquitto.org/) (MQTT); local or multi-machine.
