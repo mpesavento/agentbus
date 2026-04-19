@@ -31,7 +31,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-archive = []  # kept for backwards compat; aiosqlite is now a base dep
 mcp = ["mcp>=1.0,<2.0"]
 dev = [
     "pytest>=8.0",
