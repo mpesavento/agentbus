@@ -39,8 +39,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mpesavento/swarmbus"
+Homepage = "https://swarmbus.dev"
 Repository = "https://github.com/mpesavento/swarmbus"
+Documentation = "https://swarmbus.dev/docs"
 
 [project.scripts]
 swarmbus = "swarmbus.cli:main"
