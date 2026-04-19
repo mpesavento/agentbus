@@ -380,6 +380,20 @@ Symptoms we hit during real deployment and the first thing to check. In every ca
 
 For deeper diagnosis: `systemctl --user status swarmbus-<agent>.service`, `journalctl --user -u swarmbus-<agent>.service -f`, and the daemon's own structured startup line (from `0.1.0`+) which names version, broker, invoke, and outbox env at the top of every boot.
 
+### Rate limiting (broker-side)
+
+swarmbus itself has no built-in rate limiter — the right place to enforce limits is the MQTT broker, which applies them to all clients regardless of library. Add to your `mosquitto.conf` (or a file in `/etc/mosquitto/conf.d/`):
+
+```
+# Max messages per second any single client can publish (0 = unlimited)
+message_rate_limit 50
+
+# Max queued messages for a subscriber before the broker starts dropping
+max_queued_messages 1000
+```
+
+Restart mosquitto after changing: `sudo systemctl restart mosquitto`. Library-level rate limiting is on the roadmap for a future release.
+
 ## Onboarding a new agent
 
 Walk-through at [docs/agent-onboarding.md](docs/agent-onboarding.md). Linear steps: pick agent-id → install → setup script → `install-systemd.sh` → `swarmbus doctor` → self-probe → announce.
